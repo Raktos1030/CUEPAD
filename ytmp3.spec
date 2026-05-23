@@ -4,6 +4,7 @@ from PyInstaller.utils.hooks import collect_all
 
 wv_datas,    wv_bins,    wv_hidden    = collect_all("webview")
 ytdlp_datas, ytdlp_bins, ytdlp_hidden = collect_all("yt_dlp")
+mut_datas,   mut_bins,   mut_hidden   = collect_all("mutagen")
 
 a = Analysis(
     ["main.py"],
@@ -12,11 +13,13 @@ a = Analysis(
         (os.path.join("ffmpeg", "ffmpeg.exe"), "."),
         *wv_bins,
         *ytdlp_bins,
+        *mut_bins,
     ],
     datas=[
         ("templates", "templates"),
         *wv_datas,
         *ytdlp_datas,
+        *mut_datas,
     ],
     hiddenimports=[
         "webview",
@@ -25,8 +28,12 @@ a = Analysis(
         "webview.platforms.mshtml",
         "clr",
         "flask",
+        "mutagen",
+        "mutagen.id3",
+        "mutagen.mp4",
         *wv_hidden,
         *ytdlp_hidden,
+        *mut_hidden,
     ],
     hookspath=[],
     runtime_hooks=[],

@@ -26,7 +26,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install flask yt-dlp pywebview pyinstaller
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
 
       # ── FFmpeg ──────────────────────────────────────────────────────────────
       - name: Download ffmpeg
@@ -69,11 +71,24 @@ jobs:
 
             ---
 
+            ### Nouveautés v2
+
+            - 🎨 Nouvelle interface glassmorphism avec aurora animée
+            - 👁️ Aperçu vidéo (thumbnail, titre, chaîne, durée, vues) avant conversion
+            - 🎚️ Choix du format : **MP3, WAV, M4A, OPUS**
+            - 🔊 Choix de la qualité : **128 / 192 / 320 kbps** ou **Max**
+            - 🏷️ Métadonnées **ID3 + cover art** auto (la thumbnail YouTube devient la pochette)
+            - 📃 Support des **playlists** YouTube (téléchargement complet, zip si plusieurs)
+            - 📜 **Historique** persistant avec re-téléchargement rapide
+            - 📋 **Auto-paste** : colle automatiquement le lien YouTube du presse-papier
+            - 📊 Vraie barre de progression avec vitesse en MB/s
+            - ✂️ Découpe (début/fin) et nom custom toujours dispo dans les options avancées
+
             ### Utilisation
             1. Lance YT-MP3 depuis le bureau ou le menu Démarrer
-            2. Colle une URL YouTube
-            3. Mets un début/fin si tu veux couper (ex: `1:30` → `3:45`)
-            4. Clique **Convertir** → télécharge le MP3
+            2. Le lien YouTube se colle tout seul s'il est dans ton presse-papier
+            3. Choisis ton format et ta qualité
+            4. Clique **Convertir** → ton audio prêt avec cover et tags
 
             Les fichiers sont sauvegardés dans `Téléchargements\YT-MP3\`.
           files: release/YT-MP3-Setup.exe
