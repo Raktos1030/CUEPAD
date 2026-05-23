@@ -1,0 +1,11 @@
+flask
+yt-dlp
+pywebview
+mutagen
+sounddevice
+soundfile
+numpy
+pydub
+pynput
+pystray
+pillow
