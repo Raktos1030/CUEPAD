@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YT → MP3</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0f0f11;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #e8e8f0;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 520px;
+      background: #18181d;
+      border: 1px solid #2a2a35;
+      border-radius: 16px;
+      padding: 36px 32px;
+      box-shadow: 0 8px 40px #0008;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 28px;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+    h1 span { color: #ff4444; }
+
+    label {
+      display: block;
+      font-size: .78rem;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"], input[type="url"] {
+      width: 100%;
+      background: #0f0f11;
+      border: 1px solid #2a2a35;
+      border-radius: 8px;
+      padding: 11px 14px;
+      color: #e8e8f0;
+      font-size: .95rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus { border-color: #ff4444; }
+
+    .field { margin-bottom: 18px; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    .hint {
+      font-size: .73rem;
+      color: #555;
+      margin-top: 5px;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 8px;
+      padding: 13px;
+      background: #ff4444;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .2s, opacity .2s;
+    }
+    button:hover { background: #e03333; }
+    button:disabled { opacity: .5; cursor: default; }
+
+    #status-box {
+      margin-top: 22px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      font-size: .9rem;
+      display: none;
+    }
+    #status-box.loading {
+      background: #1e1e28;
+      border: 1px solid #2a2a35;
+      color: #aaa;
+    }
+    #status-box.success {
+      background: #0f2318;
+      border: 1px solid #1a5c35;
+      color: #4ade80;
+    }
+    #status-box.error {
+      background: #250f0f;
+      border: 1px solid #5c1a1a;
+      color: #f87171;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #444;
+      border-top-color: #ff4444;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #dl-btn {
+      display: none;
+      margin-top: 12px;
+      background: #1a5c35;
+      text-align: center;
+      color: #4ade80;
+      border: 1px solid #1a5c35;
+      text-decoration: none;
+      padding: 12px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: .95rem;
+    }
+    #dl-btn:hover { background: #1e6e3e; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1><span>YT</span> → MP3</h1>
+
+    <form id="form">
+      <div class="field">
+        <label>URL YouTube</label>
+        <input type="url" name="url" id="url" placeholder="https://www.youtube.com/watch?v=..." required />
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>Début (optionnel)</label>
+          <input type="text" name="start" id="start" placeholder="1:30" />
+          <p class="hint">mm:ss ou hh:mm:ss</p>
+        </div>
+        <div class="field">
+          <label>Fin (optionnel)</label>
+          <input type="text" name="end" id="end" placeholder="3:45" />
+          <p class="hint">mm:ss ou hh:mm:ss</p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Nom du fichier (optionnel)</label>
+        <input type="text" name="name" id="name" placeholder="ma-musique" />
+      </div>
+
+      <button type="submit" id="btn">Convertir</button>
+    </form>
+
+    <div id="status-box"></div>
+    <a id="dl-btn" href="#">Télécharger le MP3</a>
+  </div>
+
+  <script>
+    const form = document.getElementById('form');
+    const btn = document.getElementById('btn');
+    const box = document.getElementById('status-box');
+    const dlBtn = document.getElementById('dl-btn');
+
+    function setStatus(msg, cls) {
+      box.style.display = 'block';
+      box.className = cls;
+      box.innerHTML = cls === 'loading'
+        ? `<span class="spinner"></span>${msg}`
+        : msg;
+    }
+
+    function poll(jobId) {
+      fetch(`/status/${jobId}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.status === 'done') {
+            setStatus('Prêt !', 'success');
+            dlBtn.style.display = 'block';
+            dlBtn.href = `/download/${jobId}`;
+            btn.disabled = false;
+            btn.textContent = 'Convertir';
+          } else if (data.status === 'error') {
+            setStatus(`Erreur : ${data.error || 'inconnue'}`, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Convertir';
+          } else {
+            setStatus(data.status, 'loading');
+            setTimeout(() => poll(jobId), 1500);
+          }
+        })
+        .catch(() => setTimeout(() => poll(jobId), 2000));
+    }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      dlBtn.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'En cours…';
+      setStatus('Démarrage…', 'loading');
+
+      const body = new FormData(form);
+      fetch('/convert', { method: 'POST', body })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) { setStatus(data.error, 'error'); btn.disabled = false; return; }
+          poll(data.job_id);
+        })
+        .catch(err => {
+          setStatus('Erreur réseau.', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Convertir';
+        });
+    });
+  </script>
+</body>
+</html>
