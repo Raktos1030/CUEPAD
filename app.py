@@ -1,23 +1,39 @@
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
 from pathlib import Path
 
+# --- Config (overridable by main.py before Flask starts) ---
+FFMPEG_CMD = "ffmpeg"
+DOWNLOADS = Path("downloads")
+
+# Resolve template folder for PyInstaller frozen mode
+if getattr(sys, "frozen", False):
+    _template_dir = Path(sys._MEIPASS) / "templates"
+else:
+    _template_dir = Path(__file__).parent / "templates"
+
 from flask import Flask, jsonify, render_template, request, send_file
 
-app = Flask(__name__)
-
-DOWNLOADS = Path("downloads")
-DOWNLOADS.mkdir(exist_ok=True)
+app = Flask(__name__, template_folder=str(_template_dir))
 
 jobs: dict[str, dict] = {}
 
 
+def configure(ffmpeg_path: str | None = None, downloads_dir: Path | None = None):
+    global FFMPEG_CMD, DOWNLOADS
+    if ffmpeg_path:
+        FFMPEG_CMD = ffmpeg_path
+    if downloads_dir:
+        DOWNLOADS = Path(downloads_dir)
+    DOWNLOADS.mkdir(parents=True, exist_ok=True)
+
+
 def _parse_time(t: str) -> str:
-    """Accept 1:30, 01:30, 00:01:30 — returns ffmpeg-compatible string."""
     t = t.strip()
     if not t:
         return ""
@@ -38,7 +54,6 @@ def _run_job(job_id: str, url: str, start: str, end: str, out_name: str):
     tmp_dir = Path(tempfile.mkdtemp())
 
     try:
-        # 1. Download best audio
         job["status"] = "Téléchargement en cours…"
         tmp_audio = tmp_dir / "audio.%(ext)s"
         dl_cmd = [
@@ -49,18 +64,20 @@ def _run_job(job_id: str, url: str, start: str, end: str, out_name: str):
             "--audio-quality", "0",
             "--output", str(tmp_audio),
             "--no-playlist",
+            "--ffmpeg-location", str(Path(FFMPEG_CMD).parent) if Path(FFMPEG_CMD).is_absolute() else "",
             url,
         ]
+        # Remove empty --ffmpeg-location if ffmpeg is just "ffmpeg"
+        dl_cmd = [x for x in dl_cmd if x]
+        # Clean up: remove --ffmpeg-location if followed by empty string (already done above)
+
         result = subprocess.run(dl_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             job["status"] = "error"
-            job["error"] = result.stderr[-500:]
+            job["error"] = result.stderr[-600:]
             return
 
-        # Find downloaded file
-        downloaded = list(tmp_dir.glob("*.mp3"))
-        if not downloaded:
-            downloaded = list(tmp_dir.glob("*.*"))
+        downloaded = list(tmp_dir.glob("*.mp3")) or list(tmp_dir.glob("*.*"))
         if not downloaded:
             job["status"] = "error"
             job["error"] = "Fichier audio introuvable après téléchargement."
@@ -69,10 +86,9 @@ def _run_job(job_id: str, url: str, start: str, end: str, out_name: str):
         src = downloaded[0]
         dest = DOWNLOADS / f"{out_name}_{job_id[:8]}.mp3"
 
-        # 2. Cut with ffmpeg if timestamps given
         if start or end:
             job["status"] = "Découpage en cours…"
-            ff_cmd = ["ffmpeg", "-y", "-i", str(src)]
+            ff_cmd = [FFMPEG_CMD, "-y", "-i", str(src)]
             if start:
                 ff_cmd += ["-ss", _parse_time(start)]
             if end:
@@ -81,7 +97,7 @@ def _run_job(job_id: str, url: str, start: str, end: str, out_name: str):
             result = subprocess.run(ff_cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 job["status"] = "error"
-                job["error"] = result.stderr[-500:]
+                job["error"] = result.stderr[-600:]
                 return
         else:
             src.rename(dest)
@@ -94,7 +110,6 @@ def _run_job(job_id: str, url: str, start: str, end: str, out_name: str):
         job["status"] = "error"
         job["error"] = str(e)
     finally:
-        # Cleanup tmp
         for f in tmp_dir.iterdir():
             f.unlink(missing_ok=True)
         tmp_dir.rmdir()
@@ -141,9 +156,9 @@ def download(job_id: str):
     job = jobs.get(job_id)
     if not job or job["status"] != "done":
         return "Fichier non prêt", 404
-    path = job["file"]
-    return send_file(path, as_attachment=True, download_name=job["filename"])
+    return send_file(job["file"], as_attachment=True, download_name=job["filename"])
 
 
 if __name__ == "__main__":
+    configure()
     app.run(debug=True, port=5000)
