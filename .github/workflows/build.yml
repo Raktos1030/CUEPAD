@@ -1,0 +1,90 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"          # déclenche sur git tag v1.0 && git push --tags
+  workflow_dispatch:  # ou manuellement depuis l'onglet Actions
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Python ──────────────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install flask yt-dlp pywebview pyinstaller
+
+      # ── FFmpeg ──────────────────────────────────────────────────────────────
+      - name: Download ffmpeg
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ffmpeg | Out-Null
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_tmp -Force
+          $exe = Get-ChildItem -Path ffmpeg_tmp -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          Copy-Item $exe.FullName ffmpeg\ffmpeg.exe
+          Remove-Item ffmpeg_tmp, ffmpeg.zip -Recurse -Force
+
+      # ── PyInstaller ─────────────────────────────────────────────────────────
+      - name: Build with PyInstaller
+        run: pyinstaller ytmp3.spec --clean --noconfirm
+
+      # ── Inno Setup ──────────────────────────────────────────────────────────
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Create installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      # ── Release (sur tag) ───────────────────────────────────────────────────
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "YT-MP3 ${{ github.ref_name }}"
+          body: |
+            ## Téléchargement
+
+            👉 Télécharge **YT-MP3-Setup.exe** ci-dessous, double-clique, installe — c'est tout.
+
+            **Aucun prérequis** : Python, ffmpeg et tout le reste sont inclus dans l'installeur.
+
+            ---
+
+            ### Utilisation
+            1. Lance YT-MP3 depuis le bureau ou le menu Démarrer
+            2. Colle une URL YouTube
+            3. Mets un début/fin si tu veux couper (ex: `1:30` → `3:45`)
+            4. Clique **Convertir** → télécharge le MP3
+
+            Les fichiers sont sauvegardés dans `Téléchargements\YT-MP3\`.
+          files: release/YT-MP3-Setup.exe
+          draft: false
+          prerelease: false
+
+      # ── Artifact (sur déclenchement manuel) ─────────────────────────────────
+      - name: Upload artifact (build manuel)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: YT-MP3-Setup
+          path: release/YT-MP3-Setup.exe
+          retention-days: 7

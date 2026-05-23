@@ -1,26 +1,22 @@
-import os
 import re
-import subprocess
 import sys
 import tempfile
 import threading
 import uuid
 from pathlib import Path
 
-# --- Config (overridable by main.py before Flask starts) ---
+from flask import Flask, jsonify, render_template, request, send_file
+
+# --- Config (overridden by main.py before Flask starts) ---
 FFMPEG_CMD = "ffmpeg"
 DOWNLOADS = Path("downloads")
 
-# Resolve template folder for PyInstaller frozen mode
 if getattr(sys, "frozen", False):
     _template_dir = Path(sys._MEIPASS) / "templates"
 else:
     _template_dir = Path(__file__).parent / "templates"
 
-from flask import Flask, jsonify, render_template, request, send_file
-
 app = Flask(__name__, template_folder=str(_template_dir))
-
 jobs: dict[str, dict] = {}
 
 
@@ -49,41 +45,50 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^\w\-. ]", "_", name).strip() or "output"
 
 
+def _progress_hook(job: dict):
+    def hook(d: dict):
+        if d["status"] == "downloading":
+            pct = d.get("_percent_str", "").strip()
+            job["status"] = f"Téléchargement {pct}…" if pct else "Téléchargement en cours…"
+        elif d["status"] == "finished":
+            job["status"] = "Conversion audio…"
+    return hook
+
+
 def _run_job(job_id: str, url: str, start: str, end: str, out_name: str):
+    import yt_dlp
+    import subprocess
+
     job = jobs[job_id]
     tmp_dir = Path(tempfile.mkdtemp())
 
     try:
         job["status"] = "Téléchargement en cours…"
-        tmp_audio = tmp_dir / "audio.%(ext)s"
-        dl_cmd = [
-            "yt-dlp",
-            "--format", "bestaudio/best",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
-            "--output", str(tmp_audio),
-            "--no-playlist",
-            "--ffmpeg-location", str(Path(FFMPEG_CMD).parent) if Path(FFMPEG_CMD).is_absolute() else "",
-            url,
-        ]
-        # Remove empty --ffmpeg-location if ffmpeg is just "ffmpeg"
-        dl_cmd = [x for x in dl_cmd if x]
-        # Clean up: remove --ffmpeg-location if followed by empty string (already done above)
 
-        result = subprocess.run(dl_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            job["status"] = "error"
-            job["error"] = result.stderr[-600:]
-            return
+        ffmpeg_dir = str(Path(FFMPEG_CMD).parent) if Path(FFMPEG_CMD).is_absolute() else None
 
-        downloaded = list(tmp_dir.glob("*.mp3")) or list(tmp_dir.glob("*.*"))
-        if not downloaded:
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "0"}],
+            "outtmpl": str(tmp_dir / "audio.%(ext)s"),
+            "noplaylist": True,
+            "progress_hooks": [_progress_hook(job)],
+            "quiet": True,
+            "no_warnings": True,
+        }
+        if ffmpeg_dir:
+            ydl_opts["ffmpeg_location"] = ffmpeg_dir
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        files = list(tmp_dir.glob("*.mp3")) or list(tmp_dir.glob("*.*"))
+        if not files:
             job["status"] = "error"
             job["error"] = "Fichier audio introuvable après téléchargement."
             return
 
-        src = downloaded[0]
+        src = files[0]
         dest = DOWNLOADS / f"{out_name}_{job_id[:8]}.mp3"
 
         if start or end:
@@ -94,10 +99,10 @@ def _run_job(job_id: str, url: str, start: str, end: str, out_name: str):
             if end:
                 ff_cmd += ["-to", _parse_time(end)]
             ff_cmd += ["-acodec", "copy", str(dest)]
-            result = subprocess.run(ff_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
+            r = subprocess.run(ff_cmd, capture_output=True, text=True)
+            if r.returncode != 0:
                 job["status"] = "error"
-                job["error"] = result.stderr[-600:]
+                job["error"] = r.stderr[-600:]
                 return
         else:
             src.rename(dest)
@@ -132,10 +137,7 @@ def convert():
 
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "En attente…", "file": None, "error": None}
-
-    thread = threading.Thread(target=_run_job, args=(job_id, url, start, end, out_name), daemon=True)
-    thread.start()
-
+    threading.Thread(target=_run_job, args=(job_id, url, start, end, out_name), daemon=True).start()
     return jsonify({"job_id": job_id})
 
 
@@ -144,11 +146,7 @@ def status(job_id: str):
     job = jobs.get(job_id)
     if not job:
         return jsonify({"error": "Job inconnu"}), 404
-    return jsonify({
-        "status": job["status"],
-        "filename": job.get("filename"),
-        "error": job.get("error"),
-    })
+    return jsonify({"status": job["status"], "filename": job.get("filename"), "error": job.get("error")})
 
 
 @app.route("/download/<job_id>")

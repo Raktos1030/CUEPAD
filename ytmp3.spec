@@ -1,21 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+from PyInstaller.utils.hooks import collect_all
 
-# Collect all pywebview files
-wv_datas, wv_binaries, wv_hiddenimports = collect_all("webview")
+wv_datas,    wv_bins,    wv_hidden    = collect_all("webview")
+ytdlp_datas, ytdlp_bins, ytdlp_hidden = collect_all("yt_dlp")
 
 a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[
-        # ffmpeg.exe must be in ./ffmpeg/ffmpeg.exe at build time
         (os.path.join("ffmpeg", "ffmpeg.exe"), "."),
-        *wv_binaries,
+        *wv_bins,
+        *ytdlp_bins,
     ],
     datas=[
         ("templates", "templates"),
         *wv_datas,
+        *ytdlp_datas,
     ],
     hiddenimports=[
         "webview",
@@ -24,11 +25,10 @@ a = Analysis(
         "webview.platforms.mshtml",
         "clr",
         "flask",
-        "yt_dlp",
-        *wv_hiddenimports,
+        *wv_hidden,
+        *ytdlp_hidden,
     ],
     hookspath=[],
-    hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
@@ -43,10 +43,9 @@ exe = EXE(
     exclude_binaries=True,
     name="YT-MP3",
     debug=False,
-    bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,   # no terminal window
+    console=False,
     icon="icon.ico" if os.path.exists("icon.ico") else None,
 )
 
