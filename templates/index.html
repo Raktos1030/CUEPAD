@@ -7,225 +7,1227 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg: #08070d;
+      --glass: rgba(255, 255, 255, 0.04);
+      --glass-strong: rgba(255, 255, 255, 0.08);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text: #f4f4f8;
+      --muted: #8a8a99;
+      --dim: #5a5a6e;
+      --accent: #ff3b6b;
+      --accent-2: #8b5cf6;
+      --accent-3: #06b6d4;
+      --success: #34d399;
+      --error: #f87171;
+      --radius: 14px;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow-x: hidden;
+    }
+
     body {
       min-height: 100vh;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      color: var(--text);
+      position: relative;
+      overflow-y: auto;
+    }
+
+    /* ─────── Aurora background ─────── */
+    .aurora {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .aurora::before, .aurora::after, .aurora .blob {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.55;
+      will-change: transform;
+    }
+    .aurora::before {
+      width: 520px; height: 520px;
+      background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+      top: -160px; left: -120px;
+      animation: float1 18s ease-in-out infinite;
+    }
+    .aurora::after {
+      width: 480px; height: 480px;
+      background: radial-gradient(circle, var(--accent-2) 0%, transparent 70%);
+      bottom: -180px; right: -140px;
+      animation: float2 22s ease-in-out infinite;
+    }
+    .aurora .blob {
+      width: 420px; height: 420px;
+      background: radial-gradient(circle, var(--accent-3) 0%, transparent 70%);
+      top: 40%; left: 50%; transform: translate(-50%, -50%);
+      animation: float3 26s ease-in-out infinite;
+      opacity: 0.35;
+    }
+    @keyframes float1 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(60px, 80px) scale(1.15); }
+    }
+    @keyframes float2 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(-80px, -60px) scale(1.1); }
+    }
+    @keyframes float3 {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-30%, -60%) scale(1.2); }
+    }
+
+    /* grain overlay */
+    .grain {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      opacity: 0.04;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence baseFrequency='0.9'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    }
+
+    /* ─────── Layout ─────── */
+    .wrap {
+      position: relative;
+      z-index: 2;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 28px 60px;
+    }
+
+    header {
       display: flex;
       align-items: center;
-      justify-content: center;
-      background: #0f0f11;
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      color: #e8e8f0;
-    }
-
-    .card {
-      width: 100%;
-      max-width: 520px;
-      background: #18181d;
-      border: 1px solid #2a2a35;
-      border-radius: 16px;
-      padding: 36px 32px;
-      box-shadow: 0 8px 40px #0008;
-    }
-
-    h1 {
-      font-size: 1.4rem;
-      font-weight: 700;
+      justify-content: space-between;
       margin-bottom: 28px;
-      color: #fff;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      font-size: 1.1rem;
       letter-spacing: -0.5px;
     }
-    h1 span { color: #ff4444; }
+    .logo-mark {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid; place-items: center;
+      box-shadow: 0 8px 24px rgba(255, 59, 107, 0.35);
+      font-size: 1rem;
+    }
+    .logo-mark svg { width: 18px; height: 18px; }
+    .logo .arrow { color: var(--muted); font-weight: 400; }
 
-    label {
-      display: block;
-      font-size: .78rem;
-      font-weight: 600;
-      color: #888;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      margin-bottom: 6px;
+    .header-btn {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 14px;
+      color: var(--text);
+      font-size: .82rem;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .header-btn:hover { background: var(--glass-strong); border-color: var(--border-strong); }
+    .header-btn .dot {
+      width: 6px; height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
     }
 
-    input[type="text"], input[type="url"] {
+    /* ─────── Glass card ─────── */
+    .card {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+    .card + .card { margin-top: 18px; }
+
+    /* ─────── URL input (hero) ─────── */
+    .url-row {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+    }
+    .url-input-wrap {
+      flex: 1;
+      position: relative;
+    }
+    .url-input-wrap svg.url-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .url-input {
       width: 100%;
-      background: #0f0f11;
-      border: 1px solid #2a2a35;
-      border-radius: 8px;
-      padding: 11px 14px;
-      color: #e8e8f0;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 13px 40px 13px 40px;
+      color: var(--text);
       font-size: .95rem;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .url-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(255, 59, 107, 0.15);
+    }
+    .url-clear {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s;
+    }
+    .url-clear:hover { background: var(--glass-strong); color: var(--text); }
+    .url-clear.show { display: flex; }
+
+    .paste-btn {
+      background: var(--glass-strong);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0 14px;
+      color: var(--text);
+      font-size: .85rem;
+      cursor: pointer;
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .paste-btn:hover { background: rgba(255, 255, 255, 0.12); }
+    .paste-btn svg { width: 14px; height: 14px; }
+
+    /* ─────── Preview ─────── */
+    .preview {
+      margin-top: 18px;
+      display: none;
+      animation: slideIn .4s ease-out;
+    }
+    .preview.show { display: block; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .preview-card {
+      display: flex;
+      gap: 14px;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      align-items: center;
+    }
+    .preview-thumb {
+      width: 110px;
+      height: 62px;
+      flex-shrink: 0;
+      border-radius: 8px;
+      background: var(--bg);
+      overflow: hidden;
+      position: relative;
+    }
+    .preview-thumb img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    .preview-thumb .play-badge {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(0, 0, 0, 0.35);
+    }
+    .preview-thumb .play-badge svg {
+      width: 22px; height: 22px;
+      color: white;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.6));
+    }
+    .preview-info { flex: 1; min-width: 0; }
+    .preview-title {
+      font-size: .92rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      line-height: 1.3;
+    }
+    .preview-meta {
+      font-size: .78rem;
+      color: var(--muted);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .preview-meta .sep {
+      width: 3px; height: 3px;
+      background: var(--dim);
+      border-radius: 50%;
+    }
+    .preview-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: rgba(139, 92, 246, 0.15);
+      color: #c4b5fd;
+      font-size: .7rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .preview-skeleton {
+      height: 86px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 100%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s linear infinite;
+      border-radius: 12px;
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ─────── Options grid ─────── */
+    .options {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .group { display: flex; flex-direction: column; gap: 8px; }
+    .group-label {
+      font-size: .72rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .1em;
+    }
+
+    .seg {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 4px;
+      gap: 2px;
+    }
+    .seg-btn {
+      background: transparent;
+      border: none;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: .82rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 7px;
+      transition: all .2s;
+    }
+    .seg-btn:hover { color: var(--text); }
+    .seg-btn.active {
+      background: var(--glass-strong);
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    .text-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-size: .88rem;
       outline: none;
       transition: border-color .2s;
     }
-    input:focus { border-color: #ff4444; }
+    .text-input:focus { border-color: var(--accent-2); }
+    .text-input::placeholder { color: var(--dim); }
 
-    .field { margin-bottom: 18px; }
+    .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-
-    .hint {
-      font-size: .73rem;
-      color: #555;
-      margin-top: 5px;
-    }
-
-    button {
-      width: 100%;
-      margin-top: 8px;
-      padding: 13px;
-      background: #ff4444;
+    /* ─────── Advanced (collapsible) ─────── */
+    .advanced-toggle {
+      margin-top: 16px;
+      background: transparent;
       border: none;
-      border-radius: 8px;
-      color: #fff;
+      color: var(--muted);
+      font-size: .82rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 0;
+      transition: color .15s;
+    }
+    .advanced-toggle:hover { color: var(--text); }
+    .advanced-toggle svg {
+      width: 12px; height: 12px;
+      transition: transform .25s;
+    }
+    .advanced-toggle.open svg { transform: rotate(180deg); }
+
+    .advanced {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .35s ease;
+    }
+    .advanced.open { max-height: 240px; }
+    .advanced-inner { padding-top: 14px; }
+
+    /* ─────── Convert button ─────── */
+    .convert-btn {
+      width: 100%;
+      margin-top: 20px;
+      padding: 15px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+      border: none;
+      border-radius: 12px;
+      color: white;
       font-size: 1rem;
       font-weight: 700;
       cursor: pointer;
-      transition: background .2s, opacity .2s;
+      transition: all .25s;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(255, 59, 107, 0.3);
     }
-    button:hover { background: #e03333; }
-    button:disabled { opacity: .5; cursor: default; }
+    .convert-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
+      opacity: 0;
+      transition: opacity .3s;
+    }
+    .convert-btn span { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; }
+    .convert-btn:hover::before { opacity: 1; }
+    .convert-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 36px rgba(255, 59, 107, 0.4); }
+    .convert-btn:active { transform: translateY(0); }
+    .convert-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
 
-    #status-box {
-      margin-top: 22px;
-      padding: 14px 16px;
-      border-radius: 8px;
-      font-size: .9rem;
+    /* ─────── Status / Progress ─────── */
+    .status {
+      margin-top: 18px;
       display: none;
+      animation: slideIn .3s ease-out;
     }
-    #status-box.loading {
-      background: #1e1e28;
-      border: 1px solid #2a2a35;
-      color: #aaa;
+    .status.show { display: block; }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: .88rem;
     }
-    #status-box.success {
-      background: #0f2318;
-      border: 1px solid #1a5c35;
-      color: #4ade80;
+    .status-label { color: var(--text); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .status-percent { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    .progress-track {
+      height: 8px;
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
     }
-    #status-box.error {
-      background: #250f0f;
-      border: 1px solid #5c1a1a;
-      color: #f87171;
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      border-radius: 4px;
+      width: 0%;
+      transition: width .35s ease;
+      box-shadow: 0 0 12px rgba(255, 59, 107, 0.5);
+      position: relative;
+    }
+    .progress-fill::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s linear infinite;
+    }
+    .progress-meta {
+      margin-top: 8px;
+      font-size: .76rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
     }
 
     .spinner {
-      display: inline-block;
       width: 14px; height: 14px;
-      border: 2px solid #444;
-      border-top-color: #ff4444;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-top-color: var(--accent);
       border-radius: 50%;
       animation: spin .7s linear infinite;
-      vertical-align: middle;
-      margin-right: 8px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    #dl-btn {
+    .status.success { }
+    .status.error .status-label { color: var(--error); }
+
+    .download-btn {
       display: none;
-      margin-top: 12px;
-      background: #1a5c35;
-      text-align: center;
-      color: #4ade80;
-      border: 1px solid #1a5c35;
-      text-decoration: none;
-      padding: 12px;
-      border-radius: 8px;
+      margin-top: 14px;
+      width: 100%;
+      padding: 13px;
+      background: linear-gradient(135deg, var(--success), #10b981);
+      border: none;
+      border-radius: 11px;
+      color: #022c1a;
       font-weight: 700;
       font-size: .95rem;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      transition: all .2s;
+      box-shadow: 0 8px 24px rgba(52, 211, 153, 0.25);
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
-    #dl-btn:hover { background: #1e6e3e; }
+    .download-btn.show { display: flex; }
+    .download-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(52, 211, 153, 0.35); }
+
+    .error-msg {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: rgba(248, 113, 113, 0.08);
+      border: 1px solid rgba(248, 113, 113, 0.2);
+      border-radius: 8px;
+      color: var(--error);
+      font-size: .82rem;
+      word-break: break-word;
+    }
+
+    /* ─────── History ─────── */
+    .history-card { display: none; }
+    .history-card.show { display: block; }
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .history-title {
+      font-size: .92rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .history-title .count {
+      background: var(--glass-strong);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: .72rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .history-clear {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: .78rem;
+      cursor: pointer;
+      transition: color .15s;
+    }
+    .history-clear:hover { color: var(--error); }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 280px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .history-list::-webkit-scrollbar { width: 6px; }
+    .history-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+    .history-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px;
+      background: rgba(0,0,0,0.2);
+      border: 1px solid transparent;
+      border-radius: 10px;
+      transition: all .15s;
+      cursor: pointer;
+    }
+    .history-item:hover {
+      background: rgba(0,0,0,0.35);
+      border-color: var(--border);
+    }
+    .history-thumb {
+      width: 48px; height: 48px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      background: var(--bg);
+      overflow: hidden;
+      position: relative;
+    }
+    .history-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .history-thumb .fmt {
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      background: rgba(0,0,0,0.8);
+      color: white;
+      font-size: .6rem;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+    .history-info { flex: 1; min-width: 0; }
+    .history-name {
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-sub {
+      font-size: .72rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .history-dl {
+      background: var(--glass-strong);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      color: var(--text);
+      font-size: .75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .history-dl:hover { background: rgba(255,255,255,0.14); }
+
+    .history-empty {
+      text-align: center;
+      padding: 24px;
+      color: var(--dim);
+      font-size: .85rem;
+    }
+
+    /* ─────── Toast ─────── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(20, 20, 30, 0.95);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 10px 16px;
+      color: var(--text);
+      font-size: .85rem;
+      z-index: 100;
+      opacity: 0;
+      transition: all .3s;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .toast svg { width: 16px; height: 16px; color: var(--success); }
+
+    @media (max-width: 560px) {
+      .options { grid-template-columns: 1fr; }
+      .wrap { padding: 24px 16px 40px; }
+      .card { padding: 20px; }
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1><span>YT</span> → MP3</h1>
+  <div class="aurora"><div class="blob"></div></div>
+  <div class="grain"></div>
 
-    <form id="form">
-      <div class="field">
-        <label>URL YouTube</label>
-        <input type="url" name="url" id="url" placeholder="https://www.youtube.com/watch?v=..." required />
-      </div>
-
-      <div class="row">
-        <div class="field">
-          <label>Début (optionnel)</label>
-          <input type="text" name="start" id="start" placeholder="1:30" />
-          <p class="hint">mm:ss ou hh:mm:ss</p>
+  <div class="wrap">
+    <header>
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"/>
+            <circle cx="6" cy="18" r="3"/>
+            <circle cx="18" cy="16" r="3"/>
+          </svg>
         </div>
-        <div class="field">
-          <label>Fin (optionnel)</label>
-          <input type="text" name="end" id="end" placeholder="3:45" />
-          <p class="hint">mm:ss ou hh:mm:ss</p>
+        <span>YT <span class="arrow">→</span> Audio</span>
+      </div>
+      <button class="header-btn" id="history-toggle" title="Historique">
+        <span class="dot"></span>
+        Historique
+      </button>
+    </header>
+
+    <div class="card">
+      <div class="url-row">
+        <div class="url-input-wrap">
+          <svg class="url-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <input type="url" class="url-input" id="url" placeholder="Colle un lien YouTube ici…" autocomplete="off" spellcheck="false" />
+          <button type="button" class="url-clear" id="url-clear" title="Effacer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <button type="button" class="paste-btn" id="paste-btn" title="Coller depuis le presse-papier">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+          Coller
+        </button>
+      </div>
+
+      <div class="preview" id="preview">
+        <div class="preview-skeleton" id="preview-skeleton" style="display:none;"></div>
+        <div class="preview-card" id="preview-card" style="display:none;">
+          <div class="preview-thumb" id="preview-thumb">
+            <img id="preview-img" alt="" />
+            <div class="play-badge"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+          </div>
+          <div class="preview-info">
+            <div class="preview-badge" id="preview-badge" style="display:none;"></div>
+            <div class="preview-title" id="preview-title"></div>
+            <div class="preview-meta" id="preview-meta"></div>
+          </div>
         </div>
       </div>
 
-      <div class="field">
-        <label>Nom du fichier (optionnel)</label>
-        <input type="text" name="name" id="name" placeholder="ma-musique" />
+      <div class="options">
+        <div class="group">
+          <div class="group-label">Format</div>
+          <div class="seg" id="format-seg">
+            <button type="button" class="seg-btn active" data-value="mp3">MP3</button>
+            <button type="button" class="seg-btn" data-value="wav">WAV</button>
+            <button type="button" class="seg-btn" data-value="m4a">M4A</button>
+            <button type="button" class="seg-btn" data-value="opus">OPUS</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-label">Qualité</div>
+          <div class="seg" id="quality-seg">
+            <button type="button" class="seg-btn" data-value="128">128k</button>
+            <button type="button" class="seg-btn" data-value="192">192k</button>
+            <button type="button" class="seg-btn active" data-value="320">320k</button>
+            <button type="button" class="seg-btn" data-value="best">Max</button>
+          </div>
+        </div>
       </div>
 
-      <button type="submit" id="btn">Convertir</button>
-    </form>
+      <button type="button" class="advanced-toggle" id="adv-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        Options avancées (découpe, nom)
+      </button>
 
-    <div id="status-box"></div>
-    <a id="dl-btn" href="#">Télécharger le MP3</a>
+      <div class="advanced" id="advanced">
+        <div class="advanced-inner">
+          <div class="row-2">
+            <div class="group">
+              <div class="group-label">Début</div>
+              <input type="text" class="text-input" id="start" placeholder="1:30 ou 0:01:30" />
+            </div>
+            <div class="group">
+              <div class="group-label">Fin</div>
+              <input type="text" class="text-input" id="end" placeholder="3:45" />
+            </div>
+          </div>
+          <div class="group" style="margin-top: 12px;">
+            <div class="group-label">Nom du fichier</div>
+            <input type="text" class="text-input" id="name" placeholder="Auto (titre de la vidéo)" />
+          </div>
+        </div>
+      </div>
+
+      <button type="button" class="convert-btn" id="convert-btn">
+        <span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><polyline points="19 12 12 19 5 12"/></svg>
+          Convertir
+        </span>
+      </button>
+
+      <div class="status" id="status">
+        <div class="status-row">
+          <div class="status-label" id="status-label">
+            <span class="spinner"></span>
+            <span id="status-text">Démarrage…</span>
+          </div>
+          <div class="status-percent" id="status-percent">0%</div>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="progress-meta">
+          <span id="progress-info"></span>
+          <span id="progress-speed"></span>
+        </div>
+        <div class="error-msg" id="error-msg" style="display:none;"></div>
+        <a class="download-btn" id="download-btn" href="#">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Télécharger
+        </a>
+      </div>
+    </div>
+
+    <div class="card history-card" id="history-card">
+      <div class="history-header">
+        <div class="history-title">
+          Historique
+          <span class="count" id="history-count">0</span>
+        </div>
+        <button class="history-clear" id="history-clear-btn">Tout effacer</button>
+      </div>
+      <div class="history-list" id="history-list"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    <span id="toast-text"></span>
   </div>
 
   <script>
-    const form = document.getElementById('form');
-    const btn = document.getElementById('btn');
-    const box = document.getElementById('status-box');
-    const dlBtn = document.getElementById('dl-btn');
+    const $ = (s) => document.querySelector(s);
+    const els = {
+      url: $('#url'),
+      urlClear: $('#url-clear'),
+      pasteBtn: $('#paste-btn'),
+      preview: $('#preview'),
+      previewCard: $('#preview-card'),
+      previewSkeleton: $('#preview-skeleton'),
+      previewImg: $('#preview-img'),
+      previewTitle: $('#preview-title'),
+      previewMeta: $('#preview-meta'),
+      previewBadge: $('#preview-badge'),
+      formatSeg: $('#format-seg'),
+      qualitySeg: $('#quality-seg'),
+      advToggle: $('#adv-toggle'),
+      advanced: $('#advanced'),
+      start: $('#start'),
+      end: $('#end'),
+      name: $('#name'),
+      convertBtn: $('#convert-btn'),
+      status: $('#status'),
+      statusText: $('#status-text'),
+      statusLabel: $('#status-label'),
+      statusPercent: $('#status-percent'),
+      progressFill: $('#progress-fill'),
+      progressInfo: $('#progress-info'),
+      progressSpeed: $('#progress-speed'),
+      errorMsg: $('#error-msg'),
+      downloadBtn: $('#download-btn'),
+      historyToggle: $('#history-toggle'),
+      historyCard: $('#history-card'),
+      historyCount: $('#history-count'),
+      historyList: $('#history-list'),
+      historyClearBtn: $('#history-clear-btn'),
+      toast: $('#toast'),
+      toastText: $('#toast-text'),
+    };
 
-    function setStatus(msg, cls) {
-      box.style.display = 'block';
-      box.className = cls;
-      box.innerHTML = cls === 'loading'
-        ? `<span class="spinner"></span>${msg}`
-        : msg;
+    const state = {
+      format: 'mp3',
+      quality: '320',
+      infoCtrl: null,
+      lastInfoUrl: '',
+      previewData: null,
+    };
+
+    // ─── Segmented controls ───
+    function setupSeg(el, key) {
+      el.addEventListener('click', (e) => {
+        const btn = e.target.closest('.seg-btn');
+        if (!btn) return;
+        el.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state[key] = btn.dataset.value;
+      });
+    }
+    setupSeg(els.formatSeg, 'format');
+    setupSeg(els.qualitySeg, 'quality');
+
+    // ─── Advanced toggle ───
+    els.advToggle.addEventListener('click', () => {
+      els.advToggle.classList.toggle('open');
+      els.advanced.classList.toggle('open');
+    });
+
+    // ─── URL helpers ───
+    const YT_RE = /(youtube\.com\/(watch\?|playlist\?|shorts\/)|youtu\.be\/)/i;
+
+    function showToast(msg) {
+      els.toastText.textContent = msg;
+      els.toast.classList.add('show');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => els.toast.classList.remove('show'), 2200);
     }
 
-    function poll(jobId) {
-      fetch(`/status/${jobId}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.status === 'done') {
-            setStatus('Prêt !', 'success');
-            dlBtn.style.display = 'block';
-            dlBtn.href = `/download/${jobId}`;
-            btn.disabled = false;
-            btn.textContent = 'Convertir';
-          } else if (data.status === 'error') {
-            setStatus(`Erreur : ${data.error || 'inconnue'}`, 'error');
-            btn.disabled = false;
-            btn.textContent = 'Convertir';
-          } else {
-            setStatus(data.status, 'loading');
-            setTimeout(() => poll(jobId), 1500);
-          }
-        })
-        .catch(() => setTimeout(() => poll(jobId), 2000));
+    function fmtDuration(sec) {
+      if (!sec || isNaN(sec)) return '';
+      sec = Math.round(sec);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      return `${m}:${String(s).padStart(2,'0')}`;
     }
 
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      dlBtn.style.display = 'none';
-      btn.disabled = true;
-      btn.textContent = 'En cours…';
-      setStatus('Démarrage…', 'loading');
+    function fmtBytes(b) {
+      if (!b) return '';
+      if (b < 1024) return `${b} B`;
+      if (b < 1024*1024) return `${(b/1024).toFixed(1)} KB`;
+      if (b < 1024*1024*1024) return `${(b/(1024*1024)).toFixed(1)} MB`;
+      return `${(b/(1024*1024*1024)).toFixed(2)} GB`;
+    }
 
-      const body = new FormData(form);
-      fetch('/convert', { method: 'POST', body })
-        .then(r => r.json())
-        .then(data => {
-          if (data.error) { setStatus(data.error, 'error'); btn.disabled = false; return; }
-          poll(data.job_id);
-        })
-        .catch(err => {
-          setStatus('Erreur réseau.', 'error');
-          btn.disabled = false;
-          btn.textContent = 'Convertir';
+    function fmtViews(n) {
+      if (!n) return '';
+      if (n < 1000) return `${n} vues`;
+      if (n < 1_000_000) return `${(n/1000).toFixed(0)}K vues`;
+      if (n < 1_000_000_000) return `${(n/1_000_000).toFixed(1)}M vues`;
+      return `${(n/1_000_000_000).toFixed(1)}B vues`;
+    }
+
+    function timeAgo(ts) {
+      const s = Math.floor(Date.now()/1000 - ts);
+      if (s < 60) return `il y a ${s}s`;
+      if (s < 3600) return `il y a ${Math.floor(s/60)}min`;
+      if (s < 86400) return `il y a ${Math.floor(s/3600)}h`;
+      return `il y a ${Math.floor(s/86400)}j`;
+    }
+
+    // ─── Preview (info fetch) ───
+    let infoDebounce;
+    function schedulePreview() {
+      clearTimeout(infoDebounce);
+      const url = els.url.value.trim();
+      els.urlClear.classList.toggle('show', !!url);
+      if (!url || !YT_RE.test(url)) {
+        hidePreview();
+        return;
+      }
+      if (url === state.lastInfoUrl) return;
+      infoDebounce = setTimeout(() => fetchPreview(url), 600);
+    }
+
+    function hidePreview() {
+      els.preview.classList.remove('show');
+      els.previewCard.style.display = 'none';
+      els.previewSkeleton.style.display = 'none';
+      state.previewData = null;
+      state.lastInfoUrl = '';
+    }
+
+    async function fetchPreview(url) {
+      state.lastInfoUrl = url;
+      if (state.infoCtrl) state.infoCtrl.abort();
+      state.infoCtrl = new AbortController();
+
+      els.preview.classList.add('show');
+      els.previewCard.style.display = 'none';
+      els.previewSkeleton.style.display = 'block';
+
+      try {
+        const r = await fetch('/info', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url}),
+          signal: state.infoCtrl.signal,
         });
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+        renderPreview(data);
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+        hidePreview();
+      }
+    }
+
+    function renderPreview(data) {
+      state.previewData = data;
+      els.previewSkeleton.style.display = 'none';
+      els.previewCard.style.display = 'flex';
+
+      if (data.thumbnail) {
+        els.previewImg.src = data.thumbnail;
+        els.previewImg.style.display = 'block';
+      } else {
+        els.previewImg.style.display = 'none';
+      }
+
+      els.previewTitle.textContent = data.title || 'Sans titre';
+
+      if (data.type === 'playlist') {
+        els.previewBadge.style.display = 'inline-flex';
+        els.previewBadge.textContent = `📃 Playlist · ${data.count} morceaux`;
+        const parts = [];
+        if (data.uploader) parts.push(data.uploader);
+        parts.push(`${data.count} pistes`);
+        els.previewMeta.innerHTML = parts.map((p, i) => i > 0 ? `<span class="sep"></span>${p}` : p).join('');
+      } else {
+        els.previewBadge.style.display = 'none';
+        const parts = [];
+        if (data.uploader) parts.push(data.uploader);
+        if (data.duration) parts.push(fmtDuration(data.duration));
+        if (data.view_count) parts.push(fmtViews(data.view_count));
+        els.previewMeta.innerHTML = parts.map((p, i) => i > 0 ? `<span class="sep"></span>${p}` : p).join('');
+      }
+    }
+
+    els.url.addEventListener('input', schedulePreview);
+    els.urlClear.addEventListener('click', () => {
+      els.url.value = '';
+      els.urlClear.classList.remove('show');
+      hidePreview();
+      els.url.focus();
+    });
+
+    // ─── Paste ───
+    async function pasteFromClipboard() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          els.url.value = text.trim();
+          schedulePreview();
+          showToast('Lien collé');
+        }
+      } catch {
+        showToast('Impossible de lire le presse-papier');
+      }
+    }
+    els.pasteBtn.addEventListener('click', pasteFromClipboard);
+
+    // Auto-paste on load if clipboard has a YouTube link
+    window.addEventListener('load', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && YT_RE.test(text.trim()) && !els.url.value) {
+          els.url.value = text.trim();
+          schedulePreview();
+          showToast('Lien YouTube détecté');
+        }
+      } catch { /* permission denied — silent */ }
+      loadHistory();
+    });
+
+    // ─── Convert ───
+    function resetStatus() {
+      els.status.classList.remove('show');
+      els.status.classList.remove('error', 'success');
+      els.progressFill.style.width = '0%';
+      els.statusPercent.textContent = '0%';
+      els.errorMsg.style.display = 'none';
+      els.downloadBtn.classList.remove('show');
+      els.progressInfo.textContent = '';
+      els.progressSpeed.textContent = '';
+      els.statusLabel.innerHTML = '<span class="spinner"></span><span id="status-text">Démarrage…</span>';
+    }
+
+    function setProgress(pct, label, speed, info) {
+      els.progressFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+      els.statusPercent.textContent = `${Math.round(pct)}%`;
+      els.statusLabel.innerHTML = `<span class="spinner"></span><span>${label}</span>`;
+      els.progressSpeed.textContent = speed || '';
+      els.progressInfo.textContent = info || '';
+    }
+
+    async function poll(jobId) {
+      try {
+        const r = await fetch(`/status/${jobId}`);
+        const data = await r.json();
+
+        if (data.status === 'done') {
+          els.progressFill.style.width = '100%';
+          els.statusPercent.textContent = '100%';
+          els.statusLabel.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span style="color:#34d399;font-weight:700;">Prêt !</span>`;
+          els.progressSpeed.textContent = '';
+          els.progressInfo.textContent = data.filename || '';
+          els.downloadBtn.href = `/download/${jobId}`;
+          els.downloadBtn.classList.add('show');
+          els.convertBtn.disabled = false;
+          els.convertBtn.querySelector('span').innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><polyline points="19 12 12 19 5 12"/></svg>Convertir';
+          loadHistory();
+          return;
+        }
+        if (data.status === 'error') {
+          els.statusLabel.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span style="color:#f87171;font-weight:700;">Erreur</span>`;
+          els.errorMsg.textContent = data.error || 'Erreur inconnue';
+          els.errorMsg.style.display = 'block';
+          els.status.classList.add('error');
+          els.convertBtn.disabled = false;
+          els.convertBtn.querySelector('span').innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><polyline points="19 12 12 19 5 12"/></svg>Réessayer';
+          return;
+        }
+        const info = data.total_items
+          ? `${data.current_item || 0}/${data.total_items} morceaux`
+          : '';
+        setProgress(data.progress || 0, data.status, data.speed, info);
+        setTimeout(() => poll(jobId), 600);
+      } catch {
+        setTimeout(() => poll(jobId), 1500);
+      }
+    }
+
+    els.convertBtn.addEventListener('click', async () => {
+      const url = els.url.value.trim();
+      if (!url) {
+        showToast('Colle d\'abord un lien YouTube');
+        els.url.focus();
+        return;
+      }
+      resetStatus();
+      els.status.classList.add('show');
+      els.convertBtn.disabled = true;
+      els.convertBtn.querySelector('span').innerHTML = '<span class="spinner"></span>Préparation…';
+
+      try {
+        const r = await fetch('/convert', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            url,
+            start: els.start.value,
+            end: els.end.value,
+            name: els.name.value,
+            format: state.format,
+            quality: state.quality,
+          }),
+        });
+        const data = await r.json();
+        if (data.error) {
+          els.errorMsg.textContent = data.error;
+          els.errorMsg.style.display = 'block';
+          els.statusLabel.innerHTML = `<span style="color:#f87171;font-weight:700;">Erreur</span>`;
+          els.convertBtn.disabled = false;
+          els.convertBtn.querySelector('span').innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><polyline points="19 12 12 19 5 12"/></svg>Convertir';
+          return;
+        }
+        poll(data.job_id);
+      } catch (e) {
+        els.errorMsg.textContent = 'Erreur réseau';
+        els.errorMsg.style.display = 'block';
+        els.convertBtn.disabled = false;
+      }
+    });
+
+    // ─── History ───
+    async function loadHistory() {
+      try {
+        const r = await fetch('/history');
+        const data = await r.json();
+        renderHistory(data.items || []);
+      } catch {}
+    }
+
+    function renderHistory(items) {
+      els.historyCount.textContent = items.length;
+      if (!items.length) {
+        els.historyList.innerHTML = '<div class="history-empty">Aucune conversion pour le moment</div>';
+        return;
+      }
+      els.historyList.innerHTML = items.map(it => `
+        <div class="history-item">
+          <div class="history-thumb">
+            ${it.thumbnail ? `<img src="${it.thumbnail}" alt="" loading="lazy" />` : ''}
+            <span class="fmt">${(it.format || '').toUpperCase()}</span>
+          </div>
+          <div class="history-info">
+            <div class="history-name" title="${escapeHtml(it.title || it.filename)}">${escapeHtml(it.title || it.filename)}</div>
+            <div class="history-sub">${escapeHtml(it.artist || '')} ${it.artist ? '·' : ''} ${fmtBytes(it.size)} · ${timeAgo(it.ts)}</div>
+          </div>
+          <a class="history-dl" href="/history/file/${encodeURIComponent(it.filename)}" download>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            DL
+          </a>
+        </div>
+      `).join('');
+    }
+
+    function escapeHtml(s) {
+      return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    els.historyToggle.addEventListener('click', () => {
+      els.historyCard.classList.toggle('show');
+      loadHistory();
+    });
+
+    els.historyClearBtn.addEventListener('click', async () => {
+      await fetch('/history/clear', {method: 'POST'});
+      loadHistory();
+      showToast('Historique effacé');
+    });
+
+    // Submit on Enter in URL field
+    els.url.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        els.convertBtn.click();
+      }
     });
   </script>
 </body>

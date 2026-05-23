@@ -51,12 +51,12 @@ def main():
 
     import webview
     window = webview.create_window(
-        "YT → MP3",
+        "YT → Audio",
         url,
-        width=580,
-        height=540,
-        resizable=False,
-        min_size=(580, 540),
+        width=780,
+        height=820,
+        resizable=True,
+        min_size=(560, 640),
     )
     webview.start()
 
