@@ -1,0 +1,83 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download ffmpeg
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ffmpeg | Out-Null
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_tmp -Force
+          $exe = Get-ChildItem -Path ffmpeg_tmp -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          Copy-Item $exe.FullName ffmpeg\ffmpeg.exe
+          $probe = Get-ChildItem -Path ffmpeg_tmp -Filter ffprobe.exe -Recurse | Select-Object -First 1
+          if ($probe) { Copy-Item $probe.FullName ffmpeg\ffprobe.exe }
+          Remove-Item ffmpeg_tmp, ffmpeg.zip -Recurse -Force
+
+      - name: Build with PyInstaller
+        run: pyinstaller q-pad.spec --clean --noconfirm
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Sync installer version with tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          (Get-Content installer.iss) -replace '#define AppVersion ".*"', "#define AppVersion `"$version`"" | Set-Content installer.iss
+
+      - name: Create installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Q-Pad ${{ github.ref_name }}"
+          body: |
+            Download **Q-Pad-Setup.exe** below and run it.
+
+            For the full feature list, see the [README](https://github.com/Raktos1030/Q-Pad#readme).
+          files: release/Q-Pad-Setup.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Upload artifact (build manuel)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Q-Pad-Setup
+          path: release/Q-Pad-Setup.exe
+          retention-days: 7

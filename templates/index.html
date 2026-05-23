@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Q-Pad</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #08070d;
+      --glass: rgba(255, 255, 255, 0.04);
+      --glass-strong: rgba(255, 255, 255, 0.08);
+      --glass-hover: rgba(255, 255, 255, 0.12);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text: #f4f4f8;
+      --muted: #8a8a99;
+      --dim: #5a5a6e;
+      --accent: #ff3b6b;
+      --accent-2: #8b5cf6;
+      --accent-3: #06b6d4;
+      --success: #34d399;
+      --error: #f87171;
+      --warning: #fbbf24;
+      --radius: 14px;
+    }
+
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+
+    body {
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      color: var(--text);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── Aurora background ─── */
+    .aurora {
+      position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+    }
+    .aurora::before, .aurora::after, .aurora .blob {
+      content: ''; position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.5;
+    }
+    .aurora::before {
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+      top: -200px; left: -160px; animation: float1 20s ease-in-out infinite;
+    }
+    .aurora::after {
+      width: 540px; height: 540px;
+      background: radial-gradient(circle, var(--accent-2) 0%, transparent 70%);
+      bottom: -220px; right: -180px; animation: float2 24s ease-in-out infinite;
+    }
+    .aurora .blob {
+      width: 480px; height: 480px;
+      background: radial-gradient(circle, var(--accent-3) 0%, transparent 70%);
+      top: 50%; left: 50%; transform: translate(-50%, -50%);
+      animation: float3 28s ease-in-out infinite; opacity: 0.3;
+    }
+    @keyframes float1 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(80px,100px) scale(1.15);} }
+    @keyframes float2 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-100px,-80px) scale(1.1);} }
+    @keyframes float3 { 0%,100%{transform:translate(-50%,-50%) scale(1);} 50%{transform:translate(-30%,-60%) scale(1.2);} }
+
+    .grain {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0.035;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence baseFrequency='0.9'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    }
+
+    /* ─── Top bar (header + tabs) ─── */
+    .topbar {
+      position: relative; z-index: 10;
+      display: flex; align-items: center; gap: 24px;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.25);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      flex-shrink: 0;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1rem; }
+    .logo-mark {
+      width: 32px; height: 32px; border-radius: 9px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid; place-items: center;
+      box-shadow: 0 6px 20px rgba(255, 59, 107, 0.35);
+    }
+    .logo-mark svg { width: 16px; height: 16px; }
+
+    .tabs { display: flex; gap: 2px; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 11px; border: 1px solid var(--border); }
+    .tab {
+      background: transparent; border: none; color: var(--muted);
+      padding: 8px 16px; font-size: .88rem; font-weight: 600; cursor: pointer;
+      border-radius: 8px; transition: all .2s; display: flex; align-items: center; gap: 6px;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { background: var(--glass-strong); color: var(--text); }
+    .tab svg { width: 14px; height: 14px; }
+
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .icon-btn {
+      background: var(--glass); border: 1px solid var(--border);
+      width: 34px; height: 34px; border-radius: 9px;
+      display: grid; place-items: center; cursor: pointer; color: var(--muted);
+      transition: all .15s;
+    }
+    .icon-btn:hover { background: var(--glass-hover); color: var(--text); border-color: var(--border-strong); }
+    .icon-btn svg { width: 16px; height: 16px; }
+
+    /* ─── Content area ─── */
+    .content {
+      position: relative; z-index: 2;
+      flex: 1; overflow-y: auto; padding: 24px;
+    }
+    .content::-webkit-scrollbar { width: 8px; }
+    .content::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+
+    .pane { display: none; max-width: 1200px; margin: 0 auto; }
+    .pane.active { display: block; animation: fadeIn .25s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ─── Cards ─── */
+    .card {
+      background: var(--glass); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 22px; backdrop-filter: blur(20px) saturate(140%); -webkit-backdrop-filter: blur(20px) saturate(140%);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+
+    .group-label {
+      font-size: .7rem; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .1em;
+    }
+
+    /* ─── Soundboard tab ─── */
+    .sb-toolbar {
+      display: grid; grid-template-columns: 2fr 2fr 2fr auto; gap: 14px; margin-bottom: 18px;
+      align-items: end;
+    }
+    .sb-toolbar .group { display: flex; flex-direction: column; gap: 6px; }
+    .sb-actions { display: flex; gap: 8px; align-items: end; }
+    .select, .text-input {
+      background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border); border-radius: 9px;
+      padding: 9px 11px; color: var(--text); font-size: .85rem; outline: none;
+      transition: border-color .15s; width: 100%;
+    }
+    .select:focus, .text-input:focus { border-color: var(--accent-2); }
+    .select option { background: #1a1a22; }
+
+    .vol-row { display: flex; align-items: center; gap: 8px; }
+    .slider {
+      -webkit-appearance: none; appearance: none; flex: 1; height: 5px; border-radius: 3px;
+      background: rgba(255,255,255,0.1); outline: none; cursor: pointer;
+    }
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      cursor: pointer; box-shadow: 0 2px 8px rgba(255, 59, 107, 0.4);
+    }
+    .slider::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%; border: none;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      cursor: pointer;
+    }
+    .vol-val { font-size: .75rem; color: var(--muted); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+
+    .toggle {
+      width: 36px; height: 20px; background: rgba(255,255,255,0.1); border-radius: 10px;
+      position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0;
+    }
+    .toggle::after {
+      content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+      background: white; border-radius: 50%; transition: transform .2s;
+    }
+    .toggle.on { background: var(--accent-2); }
+    .toggle.on::after { transform: translateX(16px); }
+    .toggle-row { display: flex; align-items: center; gap: 8px; }
+    .toggle-row .lbl { font-size: .82rem; color: var(--text); }
+
+    .btn {
+      background: var(--glass-strong); border: 1px solid var(--border); border-radius: 9px;
+      padding: 9px 14px; color: var(--text); font-size: .85rem; font-weight: 600;
+      cursor: pointer; transition: all .15s; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { background: var(--glass-hover); border-color: var(--border-strong); }
+    .btn.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border: none; color: white; box-shadow: 0 6px 20px rgba(255, 59, 107, 0.3);
+    }
+    .btn.primary:hover { transform: translateY(-1px); }
+    .btn.danger { color: var(--error); }
+    .btn.danger:hover { background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.3); }
+    .btn svg { width: 14px; height: 14px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .sb-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;
+    }
+    .sound-btn {
+      background: var(--glass); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px; cursor: pointer; transition: all .15s; position: relative; text-align: left;
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); overflow: hidden;
+    }
+    .sound-btn:hover { background: var(--glass-strong); border-color: var(--border-strong); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+    .sound-btn:active { transform: translateY(0); }
+    .sound-btn::before {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(135deg, var(--accent-color, var(--accent)) 0%, transparent 60%);
+      opacity: 0.15; pointer-events: none;
+    }
+    .sound-btn.playing {
+      border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255, 59, 107, 0.3), 0 10px 30px rgba(255, 59, 107, 0.2);
+    }
+    .sound-btn.playing::after {
+      content: ''; position: absolute; inset: 0; border-radius: 12px;
+      box-shadow: inset 0 0 30px rgba(255, 59, 107, 0.15);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.5;} }
+
+    .sound-icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent-color, var(--accent)), var(--accent-color2, var(--accent-2)));
+      display: grid; place-items: center; color: white; font-weight: 700; font-size: 1rem;
+      margin-bottom: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .sound-name {
+      font-size: .9rem; font-weight: 600; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 4px;
+    }
+    .sound-meta {
+      font-size: .72rem; color: var(--muted); display: flex; align-items: center; gap: 6px;
+    }
+    .sound-meta .badge {
+      padding: 1px 6px; background: rgba(0,0,0,0.35); border-radius: 4px;
+      font-size: .65rem; text-transform: uppercase; font-weight: 700;
+    }
+    .sound-hotkey {
+      font-family: monospace; font-size: .68rem; padding: 1px 5px;
+      background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border-radius: 4px;
+    }
+    .sound-edit {
+      position: absolute; top: 8px; right: 8px; opacity: 0; transition: opacity .15s;
+      background: rgba(0,0,0,0.5); border: none; color: white; cursor: pointer;
+      width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center;
+      z-index: 1;
+    }
+    .sound-btn:hover .sound-edit { opacity: 1; }
+    .sound-edit:hover { background: rgba(0,0,0,0.8); }
+    .sound-edit svg { width: 12px; height: 12px; }
+
+    .empty-state {
+      text-align: center; padding: 60px 20px; color: var(--muted);
+    }
+    .empty-state h3 { font-size: 1.1rem; color: var(--text); margin-bottom: 8px; }
+    .empty-state p { font-size: .88rem; margin-bottom: 16px; }
+    .empty-state svg { width: 56px; height: 56px; color: var(--dim); margin-bottom: 16px; }
+
+    .virtual-banner {
+      margin-bottom: 14px; padding: 12px 14px; background: rgba(251, 191, 36, 0.08);
+      border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 10px;
+      display: flex; gap: 10px; align-items: flex-start; font-size: .82rem;
+    }
+    .virtual-banner svg { width: 16px; height: 16px; color: var(--warning); flex-shrink: 0; margin-top: 1px; }
+    .virtual-banner strong { color: var(--warning); display: block; margin-bottom: 2px; }
+    .virtual-banner a { color: var(--accent-3); text-decoration: underline; }
+
+    /* ─── Convert tab ─── */
+    .convert-grid {
+      display: grid; grid-template-columns: 1fr 380px; gap: 18px;
+    }
+    @media (max-width: 940px) { .convert-grid { grid-template-columns: 1fr; } }
+
+    .url-row { display: flex; gap: 10px; }
+    .url-input-wrap { flex: 1; position: relative; }
+    .url-input-wrap svg.url-icon {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      width: 16px; height: 16px; color: var(--muted); pointer-events: none;
+    }
+    .url-input {
+      width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 40px 12px 40px; color: var(--text); font-size: .92rem;
+      outline: none; transition: all .2s;
+    }
+    .url-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 59, 107, 0.15); }
+    .url-clear {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      background: transparent; border: none; color: var(--muted); cursor: pointer;
+      width: 22px; height: 22px; border-radius: 50%;
+      display: none; align-items: center; justify-content: center;
+    }
+    .url-clear:hover { background: var(--glass-strong); color: var(--text); }
+    .url-clear.show { display: flex; }
+
+    .preview {
+      margin-top: 14px; display: none; animation: slideIn .3s ease-out;
+    }
+    .preview.show { display: block; }
+    @keyframes slideIn { from {opacity:0;transform:translateY(8px);} to {opacity:1;transform:translateY(0);} }
+
+    .preview-card {
+      display: flex; gap: 12px; padding: 10px; background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border); border-radius: 10px; align-items: center;
+    }
+    .preview-thumb {
+      width: 96px; height: 54px; flex-shrink: 0; border-radius: 6px; background: var(--bg);
+      overflow: hidden; position: relative;
+    }
+    .preview-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .preview-info { flex: 1; min-width: 0; }
+    .preview-title { font-size: .88rem; font-weight: 600; line-height: 1.3; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .preview-meta { font-size: .74rem; color: var(--muted); }
+    .preview-skeleton { height: 76px; background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 100%); background-size: 200% 100%; animation: shimmer 1.5s linear infinite; border-radius: 10px; }
+    @keyframes shimmer { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+    .preview-badge { display: inline-flex; padding: 2px 7px; border-radius: 5px; background: rgba(139, 92, 246, 0.15); color: #c4b5fd; font-size: .68rem; font-weight: 600; margin-bottom: 4px; }
+
+    .seg {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+      background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border); border-radius: 9px;
+      padding: 3px; gap: 2px;
+    }
+    .seg-btn {
+      background: transparent; border: none; padding: 7px 8px;
+      color: var(--muted); font-size: .8rem; font-weight: 600; cursor: pointer;
+      border-radius: 6px; transition: all .15s;
+    }
+    .seg-btn:hover { color: var(--text); }
+    .seg-btn.active { background: var(--glass-strong); color: var(--text); }
+
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .toggle-card {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--border);
+      border-radius: 9px; cursor: pointer;
+    }
+    .toggle-card .info { display: flex; flex-direction: column; gap: 2px; }
+    .toggle-card .ttl { font-size: .85rem; font-weight: 600; }
+    .toggle-card .sub { font-size: .72rem; color: var(--muted); }
+
+    .convert-btn {
+      width: 100%; padding: 13px; margin-top: 6px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border: none; border-radius: 11px; color: white; font-size: .95rem; font-weight: 700;
+      cursor: pointer; transition: all .2s; box-shadow: 0 8px 24px rgba(255, 59, 107, 0.3);
+    }
+    .convert-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(255, 59, 107, 0.4); }
+    .convert-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .convert-btn span { display: inline-flex; align-items: center; gap: 8px; }
+
+    .spinner {
+      width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.15);
+      border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status { display: none; margin-top: 14px; animation: slideIn .3s; }
+    .status.show { display: block; }
+    .status-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: .85rem; }
+    .status-label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .status-percent { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .progress-track { height: 6px; background: rgba(0,0,0,0.35); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 3px; width: 0%; transition: width .3s; box-shadow: 0 0 10px rgba(255, 59, 107, 0.4); }
+    .progress-meta { margin-top: 6px; font-size: .74rem; color: var(--muted); display: flex; justify-content: space-between; }
+    .error-msg { margin-top: 10px; padding: 9px 11px; background: rgba(248, 113, 113, 0.08); border: 1px solid rgba(248, 113, 113, 0.2); border-radius: 7px; color: var(--error); font-size: .8rem; word-break: break-word; }
+    .download-btn { display: none; margin-top: 12px; padding: 11px; background: linear-gradient(135deg, var(--success), #10b981); border: none; border-radius: 10px; color: #022c1a; font-weight: 700; font-size: .9rem; text-decoration: none; text-align: center; transition: all .2s; }
+    .download-btn.show { display: block; }
+
+    .convert-history-card { margin-top: 18px; }
+    .convert-history-list { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
+    .convert-history-list::-webkit-scrollbar { width: 5px; }
+    .convert-history-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+    .ch-item { display: flex; align-items: center; gap: 10px; padding: 8px; background: rgba(0,0,0,0.2); border: 1px solid transparent; border-radius: 8px; }
+    .ch-item:hover { background: rgba(0,0,0,0.35); border-color: var(--border); }
+    .ch-thumb { width: 42px; height: 42px; border-radius: 6px; background: var(--bg); overflow: hidden; flex-shrink: 0; }
+    .ch-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .ch-info { flex: 1; min-width: 0; }
+    .ch-name { font-size: .8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ch-sub { font-size: .68rem; color: var(--muted); margin-top: 1px; }
+
+    /* ─── Settings tab ─── */
+    .settings-grid { display: grid; grid-template-columns: 1fr; gap: 18px; max-width: 720px; }
+    .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-row .label { flex: 1; }
+    .settings-row .label .ttl { font-size: .92rem; font-weight: 600; }
+    .settings-row .label .sub { font-size: .77rem; color: var(--muted); margin-top: 2px; }
+    .settings-row .control { display: flex; align-items: center; gap: 8px; min-width: 200px; justify-content: flex-end; }
+
+    h2.section-title { font-size: 1rem; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+    h2.section-title .ico { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; }
+    h2.section-title .ico svg { width: 12px; height: 12px; }
+
+    /* ─── Modal ─── */
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 100;
+      display: none; align-items: center; justify-content: center;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    }
+    .modal-bg.show { display: flex; animation: fadeIn .2s; }
+    .modal {
+      background: rgba(15, 14, 22, 0.95); border: 1px solid var(--border-strong);
+      border-radius: 14px; padding: 22px; min-width: 420px; max-width: 480px;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+    }
+    .modal h3 { font-size: 1.05rem; margin-bottom: 18px; }
+    .modal .field { margin-bottom: 14px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+    .hotkey-input {
+      background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border); border-radius: 9px;
+      padding: 10px 12px; color: var(--text); font-size: .9rem; cursor: pointer;
+      font-family: monospace; min-height: 38px; display: flex; align-items: center; gap: 6px;
+      transition: all .15s;
+    }
+    .hotkey-input:hover { border-color: var(--border-strong); }
+    .hotkey-input.capturing { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 59, 107, 0.15); }
+    .hotkey-input.empty { color: var(--dim); }
+    .hotkey-input .clear-hk {
+      margin-left: auto; background: transparent; border: none; color: var(--muted); cursor: pointer;
+      width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+    }
+    .hotkey-input .clear-hk:hover { background: var(--glass-strong); color: var(--text); }
+
+    /* ─── Toast ─── */
+    .toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: rgba(20, 20, 30, 0.96); backdrop-filter: blur(16px);
+      border: 1px solid var(--border-strong); border-radius: 10px;
+      padding: 9px 14px; color: var(--text); font-size: .82rem; z-index: 200;
+      opacity: 0; transition: all .25s; pointer-events: none;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast svg { width: 14px; height: 14px; color: var(--success); }
+    .toast.error svg { color: var(--error); }
+
+    /* ─── Misc ─── */
+    .badge {
+      display: inline-block; padding: 2px 7px; border-radius: 5px;
+      background: rgba(139, 92, 246, 0.15); color: #c4b5fd;
+      font-size: .68rem; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="aurora"><div class="blob"></div></div>
+  <div class="grain"></div>
+
+  <!-- ═══════════════ TOP BAR ═══════════════ -->
+  <div class="topbar">
+    <div class="logo">
+      <div class="logo-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="4" height="10" rx="1"/>
+          <rect x="10" y="7" width="4" height="14" rx="1"/>
+          <rect x="17" y="3" width="4" height="18" rx="1"/>
+        </svg>
+      </div>
+      Q-Pad
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="soundboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Soundboard
+      </button>
+      <button class="tab" data-tab="convert">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Convert
+      </button>
+      <button class="tab" data-tab="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </div>
+
+    <div class="topbar-right">
+      <button class="icon-btn" id="minimize-btn" title="Réduire dans la barre">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══════════════ CONTENT ═══════════════ -->
+  <div class="content">
+
+    <!-- ═══════════════ SOUNDBOARD PANE ═══════════════ -->
+    <div class="pane active" id="pane-soundboard">
+      <div class="card" style="margin-bottom: 18px;">
+        <div class="sb-toolbar">
+          <div class="group">
+            <div class="group-label">Sortie principale</div>
+            <select class="select" id="sb-output-main"></select>
+          </div>
+          <div class="group">
+            <div class="group-label">Monitor (toi)</div>
+            <select class="select" id="sb-output-monitor"></select>
+          </div>
+          <div class="group">
+            <div class="group-label">Volume principal</div>
+            <div class="vol-row">
+              <input type="range" min="0" max="200" value="100" class="slider" id="sb-vol-main"/>
+              <span class="vol-val" id="sb-vol-main-val">100%</span>
+            </div>
+          </div>
+          <div class="sb-actions">
+            <button class="btn" id="sb-open-folder" title="Ouvrir le dossier des sons">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </button>
+            <button class="btn" id="sb-go-convert" title="Aller au convertisseur YouTube">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </button>
+            <button class="btn danger" id="sb-stop-all" title="Stopper tous les sons">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              Stop
+            </button>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px;">
+          <div class="toggle-row">
+            <div class="toggle" id="sb-monitor-toggle"></div>
+            <span class="lbl">Monitor activé</span>
+          </div>
+          <div class="vol-row">
+            <span class="lbl" style="font-size: .82rem; color: var(--muted);">Volume monitor</span>
+            <input type="range" min="0" max="200" value="70" class="slider" id="sb-vol-monitor"/>
+            <span class="vol-val" id="sb-vol-monitor-val">70%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="virtual-banner" id="virtual-banner" style="display: none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div>
+          <strong>Aucun câble audio virtuel détecté</strong>
+          Pour que les sons sortent comme si tu parlais dans ton micro, installe <a href="https://vb-audio.com/Cable/" target="_blank">VB-Cable</a> (gratuit), puis sélectionne « CABLE Input » en sortie principale.
+        </div>
+      </div>
+
+      <div class="sb-grid" id="sb-grid"></div>
+
+      <div class="empty-state" id="sb-empty" style="display: none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          <h3>Aucun son dans ta bibliothèque</h3>
+          <p>Ajoute des sons via l'onglet <strong>Convert</strong> ou dépose des fichiers audio dans le dossier de la bibliothèque.</p>
+          <button class="btn primary" onclick="switchTab('convert')">Aller à Convert</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ CONVERT PANE ═══════════════ -->
+    <div class="pane" id="pane-convert">
+      <div class="convert-grid">
+        <div>
+          <div class="card">
+            <div class="url-row">
+              <div class="url-input-wrap">
+                <svg class="url-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                <input type="url" class="url-input" id="url" placeholder="Colle un lien YouTube ici…" autocomplete="off" spellcheck="false"/>
+                <button type="button" class="url-clear" id="url-clear" title="Effacer">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <button class="btn" id="paste-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+                Coller
+              </button>
+            </div>
+
+            <div class="preview" id="preview">
+              <div class="preview-skeleton" id="preview-skeleton" style="display:none;"></div>
+              <div class="preview-card" id="preview-card" style="display:none;">
+                <div class="preview-thumb"><img id="preview-img" alt=""/></div>
+                <div class="preview-info">
+                  <div class="preview-badge" id="preview-badge" style="display:none;"></div>
+                  <div class="preview-title" id="preview-title"></div>
+                  <div class="preview-meta" id="preview-meta"></div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;">
+              <div class="field">
+                <div class="group-label">Format</div>
+                <div class="seg" id="format-seg">
+                  <button class="seg-btn active" data-value="mp3">MP3</button>
+                  <button class="seg-btn" data-value="wav">WAV</button>
+                  <button class="seg-btn" data-value="m4a">M4A</button>
+                  <button class="seg-btn" data-value="opus">OPUS</button>
+                </div>
+              </div>
+              <div class="field">
+                <div class="group-label">Qualité</div>
+                <div class="seg" id="quality-seg">
+                  <button class="seg-btn" data-value="128">128k</button>
+                  <button class="seg-btn" data-value="192">192k</button>
+                  <button class="seg-btn active" data-value="320">320k</button>
+                  <button class="seg-btn" data-value="best">Max</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="toggle-card" id="original-card" style="margin-top: 12px;">
+              <div class="info">
+                <span class="ttl">Mode Original</span>
+                <span class="sub">Récupère l'audio natif de YouTube sans re-encoder. Qualité parfaite, ultra rapide. Format souvent .opus / .webm.</span>
+              </div>
+              <div class="toggle" id="original-toggle"></div>
+            </div>
+
+            <div class="field-row" style="margin-top: 12px;">
+              <div class="field">
+                <div class="group-label">Début (optionnel)</div>
+                <input type="text" class="text-input" id="start" placeholder="1:30"/>
+              </div>
+              <div class="field">
+                <div class="group-label">Fin (optionnel)</div>
+                <input type="text" class="text-input" id="end" placeholder="3:45"/>
+              </div>
+            </div>
+            <div class="field">
+              <div class="group-label">Nom du fichier (optionnel)</div>
+              <input type="text" class="text-input" id="name" placeholder="Auto (titre vidéo)"/>
+            </div>
+
+            <button class="convert-btn" id="convert-btn">
+              <span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><polyline points="19 12 12 19 5 12"/></svg>
+                Convertir
+              </span>
+            </button>
+
+            <div class="status" id="status">
+              <div class="status-row">
+                <div class="status-label" id="status-label"><span class="spinner"></span><span>Démarrage…</span></div>
+                <div class="status-percent" id="status-percent">0%</div>
+              </div>
+              <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+              <div class="progress-meta"><span id="progress-info"></span><span id="progress-speed"></span></div>
+              <div class="error-msg" id="error-msg" style="display:none;"></div>
+              <a class="download-btn" id="download-btn" href="#">Télécharger</a>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card convert-history-card">
+            <h2 class="section-title">
+              <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+              Historique <span class="badge" id="history-count">0</span>
+            </h2>
+            <div class="convert-history-list" id="history-list">
+              <div class="empty-state" style="padding: 20px;">
+                <p style="font-size: .8rem;">Aucune conversion pour l'instant.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ SETTINGS PANE ═══════════════ -->
+    <div class="pane" id="pane-settings">
+      <div class="card" style="max-width: 760px; margin: 0 auto;">
+        <h2 class="section-title">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-7h3zM3 19a2 2 0 0 0 2 2h1v-7H3z"/></svg></div>
+          Audio
+        </h2>
+
+        <div class="settings-row">
+          <div class="label">
+            <div class="ttl">Sortie principale</div>
+            <div class="sub">Là où sortent les sons quand tu joues. Sélectionne ton câble virtuel pour streamer/Discord.</div>
+          </div>
+          <div class="control"><select class="select" id="st-output-main"></select></div>
+        </div>
+        <div class="settings-row">
+          <div class="label">
+            <div class="ttl">Monitor (ce que tu entends)</div>
+            <div class="sub">Sortie secondaire pour t'entendre toi-même. Mets tes écouteurs ici.</div>
+          </div>
+          <div class="control"><select class="select" id="st-output-monitor"></select></div>
+        </div>
+        <div class="settings-row">
+          <div class="label">
+            <div class="ttl">Monitor activé</div>
+            <div class="sub">Si désactivé, tu n'entendras pas les sons que tu joues.</div>
+          </div>
+          <div class="control"><div class="toggle" id="st-monitor-toggle"></div></div>
+        </div>
+
+        <h2 class="section-title" style="margin-top: 26px;">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/></svg></div>
+          Raccourcis
+        </h2>
+        <div class="settings-row">
+          <div class="label">
+            <div class="ttl">Raccourcis globaux activés</div>
+            <div class="sub">Les hotkeys fonctionnent même quand Q-Pad n'est pas au premier plan.</div>
+          </div>
+          <div class="control"><div class="toggle" id="st-hotkeys-toggle"></div></div>
+        </div>
+
+        <h2 class="section-title" style="margin-top: 26px;">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+          Bibliothèque
+        </h2>
+        <div class="settings-row">
+          <div class="label">
+            <div class="ttl">Dossier des sons</div>
+            <div class="sub" id="lib-dir-sub">…</div>
+          </div>
+          <div class="control"></div>
+        </div>
+
+        <h2 class="section-title" style="margin-top: 26px;">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>
+          À propos
+        </h2>
+        <p style="font-size: .85rem; color: var(--muted); line-height: 1.5;">
+          Q-Pad — soundboard locale avec convertisseur YouTube intégré.<br/>
+          Pour utiliser comme micro virtuel sur Discord/streams, installe <a href="https://vb-audio.com/Cable/" target="_blank" style="color: var(--accent-3);">VB-Cable</a> ou <a href="https://vb-audio.com/Voicemeeter/" target="_blank" style="color: var(--accent-3);">VoiceMeeter</a>.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ EDIT SOUND MODAL ═══════════════ -->
+  <div class="modal-bg" id="edit-modal">
+    <div class="modal">
+      <h3 id="edit-title">Modifier le son</h3>
+      <div class="field">
+        <div class="group-label">Nom du fichier</div>
+        <input type="text" class="text-input" id="edit-name"/>
+      </div>
+      <div class="field">
+        <div class="group-label">Volume <span style="color: var(--muted);" id="edit-vol-val">100%</span></div>
+        <input type="range" min="0" max="200" value="100" class="slider" id="edit-vol"/>
+      </div>
+      <div class="field">
+        <div class="group-label">Raccourci clavier</div>
+        <div class="hotkey-input" id="edit-hotkey">
+          <span id="edit-hotkey-text">Clique pour définir…</span>
+          <button class="clear-hk" id="edit-hotkey-clear" style="display:none;">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn danger" id="edit-delete">Supprimer</button>
+        <button class="btn" id="edit-cancel">Annuler</button>
+        <button class="btn primary" id="edit-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    <span id="toast-text"></span>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const $$ = (s) => document.querySelectorAll(s);
+
+    // ─── State ───────────────────────────────────────────────────────────────
+    const state = {
+      settings: null,
+      sounds: [],
+      devices: [],
+      playingTimers: new Map(),
+      convertFormat: 'mp3',
+      convertQuality: '320',
+      convertOriginal: false,
+      previewCtrl: null,
+      lastInfoUrl: '',
+      editingSound: null,
+      capturingHotkey: false,
+    };
+
+    // ─── Toast ───────────────────────────────────────────────────────────────
+    let toastTimer;
+    function toast(msg, isError = false) {
+      const t = $('#toast');
+      $('#toast-text').textContent = msg;
+      t.classList.toggle('error', isError);
+      t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+    }
+
+    // ─── Tabs ────────────────────────────────────────────────────────────────
+    function switchTab(name) {
+      $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      $$('.pane').forEach(p => p.classList.toggle('active', p.id === `pane-${name}`));
+      saveSetting('active_tab', name);
+      if (name === 'soundboard') refreshSounds();
+      if (name === 'convert') refreshHistory();
+    }
+    $('#tabs').addEventListener('click', e => {
+      const tab = e.target.closest('.tab');
+      if (tab) switchTab(tab.dataset.tab);
+    });
+    window.switchTab = switchTab;
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+    function escapeHtml(s) {
+      return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function fmtBytes(b) {
+      if (!b) return '';
+      if (b < 1024) return `${b} B`;
+      if (b < 1024*1024) return `${(b/1024).toFixed(1)} KB`;
+      if (b < 1024*1024*1024) return `${(b/(1024*1024)).toFixed(1)} MB`;
+      return `${(b/(1024*1024*1024)).toFixed(2)} GB`;
+    }
+    function timeAgo(ts) {
+      const s = Math.floor(Date.now()/1000 - ts);
+      if (s < 60) return `${s}s`;
+      if (s < 3600) return `${Math.floor(s/60)}min`;
+      if (s < 86400) return `${Math.floor(s/3600)}h`;
+      return `${Math.floor(s/86400)}j`;
+    }
+    function fmtDuration(sec) {
+      if (!sec) return '';
+      sec = Math.round(sec);
+      const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+      if (h) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      return `${m}:${String(s).padStart(2,'0')}`;
+    }
+    function colorFromName(name) {
+      let h = 0;
+      for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+      const hue = Math.abs(h) % 360;
+      return [`hsl(${hue}, 70%, 55%)`, `hsl(${(hue + 40) % 360}, 70%, 55%)`];
+    }
+
+    // ─── Settings load/save ──────────────────────────────────────────────────
+    async function loadSettings() {
+      const r = await fetch('/settings'); state.settings = await r.json();
+      applySettings();
+    }
+    async function saveSetting(key, value) {
+      if (!state.settings) state.settings = {};
+      state.settings[key] = value;
+      await fetch('/settings', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({[key]: value}),
+      });
+    }
+
+    function applySettings() {
+      const s = state.settings || {};
+      // Soundboard pane
+      $('#sb-vol-main').value = Math.round((s.volume_main ?? 1.0) * 100);
+      $('#sb-vol-main-val').textContent = `${$('#sb-vol-main').value}%`;
+      $('#sb-vol-monitor').value = Math.round((s.volume_monitor ?? 0.7) * 100);
+      $('#sb-vol-monitor-val').textContent = `${$('#sb-vol-monitor').value}%`;
+      $('#sb-monitor-toggle').classList.toggle('on', !!s.monitor_enabled);
+      // Settings pane
+      $('#st-monitor-toggle').classList.toggle('on', !!s.monitor_enabled);
+      $('#st-hotkeys-toggle').classList.toggle('on', !!s.hotkeys_enabled);
+      $('#lib-dir-sub').textContent = s.library_dir || '~/Downloads/Q-Pad Soundboard';
+      // Active tab
+      if (s.active_tab && s.active_tab !== 'soundboard') switchTab(s.active_tab);
+    }
+
+    // ─── Devices ─────────────────────────────────────────────────────────────
+    async function loadDevices() {
+      const r = await fetch('/devices'); const data = await r.json();
+      state.devices = data.outputs || [];
+      const fill = (selectEl, currentVal) => {
+        selectEl.innerHTML = '<option value="">— Système par défaut —</option>' +
+          state.devices.map(d => {
+            const tag = d.virtual ? ' 🎙️' : (d.default ? ' (défaut)' : '');
+            return `<option value="${d.id}" ${currentVal == d.id ? 'selected' : ''}>${escapeHtml(d.name)}${tag}</option>`;
+          }).join('');
+      };
+      const s = state.settings || {};
+      fill($('#sb-output-main'), s.output_main);
+      fill($('#sb-output-monitor'), s.output_monitor);
+      fill($('#st-output-main'), s.output_main);
+      fill($('#st-output-monitor'), s.output_monitor);
+
+      const hasVirtual = state.devices.some(d => d.virtual);
+      $('#virtual-banner').style.display = hasVirtual ? 'none' : 'flex';
+    }
+
+    function bindDeviceSelect(id, key) {
+      $(`#${id}`).addEventListener('change', e => {
+        const v = e.target.value ? parseInt(e.target.value, 10) : null;
+        saveSetting(key, v);
+        // Mirror to the other select with same key
+        $$(`[id$="${key.includes('main') ? 'output-main' : 'output-monitor'}"]`).forEach(el => {
+          if (el.id !== id) el.value = e.target.value;
+        });
+      });
+    }
+    bindDeviceSelect('sb-output-main', 'output_main');
+    bindDeviceSelect('sb-output-monitor', 'output_monitor');
+    bindDeviceSelect('st-output-main', 'output_main');
+    bindDeviceSelect('st-output-monitor', 'output_monitor');
+
+    // ─── Sliders ─────────────────────────────────────────────────────────────
+    function bindSlider(id, valId, key, divisor = 100) {
+      const el = $(`#${id}`), val = $(`#${valId}`);
+      el.addEventListener('input', () => {
+        val.textContent = `${el.value}%`;
+        saveSetting(key, parseInt(el.value, 10) / divisor);
+      });
+    }
+    bindSlider('sb-vol-main', 'sb-vol-main-val', 'volume_main');
+    bindSlider('sb-vol-monitor', 'sb-vol-monitor-val', 'volume_monitor');
+
+    // ─── Toggles ─────────────────────────────────────────────────────────────
+    function bindToggle(id, key, mirror = null) {
+      const el = $(`#${id}`);
+      el.addEventListener('click', () => {
+        const newVal = !el.classList.contains('on');
+        el.classList.toggle('on', newVal);
+        if (mirror) $(`#${mirror}`).classList.toggle('on', newVal);
+        saveSetting(key, newVal);
+      });
+    }
+    bindToggle('sb-monitor-toggle', 'monitor_enabled', 'st-monitor-toggle');
+    bindToggle('st-monitor-toggle', 'monitor_enabled', 'sb-monitor-toggle');
+    bindToggle('st-hotkeys-toggle', 'hotkeys_enabled');
+
+    // ─── Sounds (soundboard) ─────────────────────────────────────────────────
+    async function refreshSounds() {
+      const r = await fetch('/sounds'); const data = await r.json();
+      state.sounds = data.items || [];
+      renderSounds();
+    }
+
+    function renderSounds() {
+      const grid = $('#sb-grid'), empty = $('#sb-empty');
+      if (!state.sounds.length) {
+        grid.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      grid.style.display = 'grid';
+      empty.style.display = 'none';
+
+      grid.innerHTML = state.sounds.map(s => {
+        const cfg = s.config || {};
+        const [c1, c2] = colorFromName(s.stem);
+        const display = s.stem;
+        const initial = display.charAt(0).toUpperCase();
+        const hk = cfg.hotkey ? `<span class="sound-hotkey">${escapeHtml(cfg.hotkey)}</span>` : '';
+        return `
+          <div class="sound-btn" data-filename="${escapeHtml(s.filename)}" style="--accent-color: ${c1}; --accent-color2: ${c2};">
+            <button class="sound-edit" data-edit="${escapeHtml(s.filename)}" title="Modifier">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+            </button>
+            <div class="sound-icon">${escapeHtml(initial)}</div>
+            <div class="sound-name" title="${escapeHtml(s.filename)}">${escapeHtml(display)}</div>
+            <div class="sound-meta">
+              <span class="badge">${escapeHtml(s.ext.toUpperCase())}</span>
+              ${hk}
+              <span>${fmtBytes(s.size)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      grid.querySelectorAll('.sound-btn').forEach(el => {
+        el.addEventListener('click', e => {
+          if (e.target.closest('.sound-edit')) return;
+          playSound(el.dataset.filename);
+        });
+      });
+      grid.querySelectorAll('.sound-edit').forEach(el => {
+        el.addEventListener('click', e => {
+          e.stopPropagation();
+          openEditModal(el.dataset.edit);
+        });
+      });
+    }
+
+    async function playSound(filename) {
+      const btn = document.querySelector(`.sound-btn[data-filename="${CSS.escape(filename)}"]`);
+      if (btn) {
+        btn.classList.add('playing');
+        clearTimeout(state.playingTimers.get(filename));
+        const t = setTimeout(() => btn.classList.remove('playing'), 2500);
+        state.playingTimers.set(filename, t);
+      }
+      try {
+        const r = await fetch('/sounds/play', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({filename}),
+        });
+        const data = await r.json();
+        if (!data.ok) toast(data.error || 'Lecture impossible', true);
+      } catch {
+        toast('Erreur de lecture', true);
+      }
+    }
+
+    $('#sb-stop-all').addEventListener('click', async () => {
+      await fetch('/sounds/stop', {method: 'POST'});
+      $$('.sound-btn.playing').forEach(b => b.classList.remove('playing'));
+      state.playingTimers.forEach(t => clearTimeout(t));
+      state.playingTimers.clear();
+      toast('Tous les sons arrêtés');
+    });
+
+    $('#sb-open-folder').addEventListener('click', async () => {
+      try {
+        const r = await fetch('/sounds/open-folder', {method: 'POST'});
+        const data = await r.json();
+        if (!data.ok) toast(data.error || 'Impossible d\'ouvrir le dossier', true);
+      } catch { toast('Erreur', true); }
+    });
+
+    $('#sb-go-convert').addEventListener('click', () => switchTab('convert'));
+
+    // ─── Edit modal ──────────────────────────────────────────────────────────
+    function openEditModal(filename) {
+      const sound = state.sounds.find(s => s.filename === filename);
+      if (!sound) return;
+      state.editingSound = filename;
+      const cfg = sound.config || {};
+      $('#edit-title').textContent = sound.stem;
+      $('#edit-name').value = sound.filename;
+      const vol = Math.round((cfg.volume ?? 1.0) * 100);
+      $('#edit-vol').value = vol;
+      $('#edit-vol-val').textContent = `${vol}%`;
+      setHotkeyDisplay(cfg.hotkey || '');
+      $('#edit-modal').classList.add('show');
+    }
+
+    function closeEditModal() {
+      $('#edit-modal').classList.remove('show');
+      state.editingSound = null;
+      state.capturingHotkey = false;
+    }
+
+    $('#edit-cancel').addEventListener('click', closeEditModal);
+    $('#edit-modal').addEventListener('click', e => {
+      if (e.target.id === 'edit-modal') closeEditModal();
+    });
+    $('#edit-vol').addEventListener('input', () => {
+      $('#edit-vol-val').textContent = `${$('#edit-vol').value}%`;
+    });
+
+    $('#edit-save').addEventListener('click', async () => {
+      if (!state.editingSound) return;
+      const original = state.editingSound;
+      const newName = $('#edit-name').value.trim();
+      const vol = parseInt($('#edit-vol').value, 10) / 100;
+      const hk = $('#edit-hotkey').dataset.combo || '';
+
+      let finalName = original;
+      if (newName && newName !== original) {
+        const r = await fetch(`/sounds/${encodeURIComponent(original)}/rename`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({new: newName}),
+        });
+        const data = await r.json();
+        if (data.ok) finalName = data.filename;
+        else { toast(data.error || 'Renommage impossible', true); return; }
+      }
+      await fetch(`/sounds/${encodeURIComponent(finalName)}/config`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({volume: vol, hotkey: hk}),
+      });
+      closeEditModal();
+      refreshSounds();
+      toast('Enregistré');
+    });
+
+    $('#edit-delete').addEventListener('click', async () => {
+      if (!state.editingSound) return;
+      if (!confirm(`Supprimer "${state.editingSound}" ?`)) return;
+      await fetch(`/sounds/${encodeURIComponent(state.editingSound)}`, {method: 'DELETE'});
+      closeEditModal();
+      refreshSounds();
+      toast('Son supprimé');
+    });
+
+    // ─── Hotkey capture ──────────────────────────────────────────────────────
+    function setHotkeyDisplay(combo) {
+      const el = $('#edit-hotkey');
+      el.dataset.combo = combo || '';
+      const text = combo || 'Clique pour définir…';
+      $('#edit-hotkey-text').textContent = text;
+      el.classList.toggle('empty', !combo);
+      $('#edit-hotkey-clear').style.display = combo ? 'grid' : 'none';
+    }
+
+    $('#edit-hotkey').addEventListener('click', () => {
+      state.capturingHotkey = true;
+      $('#edit-hotkey').classList.add('capturing');
+      $('#edit-hotkey-text').textContent = 'Appuie sur ta combinaison…';
+    });
+
+    $('#edit-hotkey-clear').addEventListener('click', e => {
+      e.stopPropagation();
+      setHotkeyDisplay('');
+    });
+
+    document.addEventListener('keydown', e => {
+      if (!state.capturingHotkey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        state.capturingHotkey = false;
+        $('#edit-hotkey').classList.remove('capturing');
+        setHotkeyDisplay($('#edit-hotkey').dataset.combo || '');
+        return;
+      }
+      const mods = [];
+      if (e.ctrlKey) mods.push('Ctrl');
+      if (e.shiftKey) mods.push('Shift');
+      if (e.altKey) mods.push('Alt');
+      if (e.metaKey) mods.push('Cmd');
+      let key = e.key;
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) return; // wait for a real key
+      if (key === ' ') key = 'Space';
+      if (key.length === 1) key = key.toUpperCase();
+      const combo = [...mods, key].join('+');
+      state.capturingHotkey = false;
+      $('#edit-hotkey').classList.remove('capturing');
+      setHotkeyDisplay(combo);
+    }, true);
+
+    // ─── Convert tab ─────────────────────────────────────────────────────────
+    function setupSeg(el, key) {
+      el.addEventListener('click', e => {
+        const btn = e.target.closest('.seg-btn');
+        if (!btn) return;
+        el.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state[key] = btn.dataset.value;
+      });
+    }
+    setupSeg($('#format-seg'), 'convertFormat');
+    setupSeg($('#quality-seg'), 'convertQuality');
+
+    $('#original-card').addEventListener('click', () => {
+      const t = $('#original-toggle');
+      state.convertOriginal = !t.classList.contains('on');
+      t.classList.toggle('on', state.convertOriginal);
+      $('#format-seg').style.opacity = state.convertOriginal ? 0.4 : 1;
+      $('#quality-seg').style.opacity = state.convertOriginal ? 0.4 : 1;
+    });
+
+    const YT_RE = /(youtube\.com\/(watch\?|playlist\?|shorts\/)|youtu\.be\/)/i;
+
+    let infoDebounce;
+    $('#url').addEventListener('input', () => {
+      clearTimeout(infoDebounce);
+      const url = $('#url').value.trim();
+      $('#url-clear').classList.toggle('show', !!url);
+      if (!url || !YT_RE.test(url)) {
+        hidePreview(); return;
+      }
+      if (url === state.lastInfoUrl) return;
+      infoDebounce = setTimeout(() => fetchPreview(url), 500);
+    });
+
+    $('#url-clear').addEventListener('click', () => {
+      $('#url').value = ''; $('#url-clear').classList.remove('show'); hidePreview(); $('#url').focus();
+    });
+
+    function hidePreview() {
+      $('#preview').classList.remove('show');
+      $('#preview-card').style.display = 'none';
+      $('#preview-skeleton').style.display = 'none';
+      state.lastInfoUrl = '';
+    }
+
+    async function fetchPreview(url) {
+      state.lastInfoUrl = url;
+      if (state.previewCtrl) state.previewCtrl.abort();
+      state.previewCtrl = new AbortController();
+      $('#preview').classList.add('show');
+      $('#preview-skeleton').style.display = 'block';
+      $('#preview-card').style.display = 'none';
+      try {
+        const r = await fetch('/info', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url}), signal: state.previewCtrl.signal,
+        });
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+        $('#preview-skeleton').style.display = 'none';
+        $('#preview-card').style.display = 'flex';
+        if (data.thumbnail) { $('#preview-img').src = data.thumbnail; }
+        $('#preview-title').textContent = data.title || 'Sans titre';
+        if (data.type === 'playlist') {
+          $('#preview-badge').style.display = 'inline-flex';
+          $('#preview-badge').textContent = `Playlist · ${data.count} morceaux`;
+          $('#preview-meta').textContent = data.uploader || '';
+        } else {
+          $('#preview-badge').style.display = 'none';
+          const parts = [];
+          if (data.uploader) parts.push(data.uploader);
+          if (data.duration) parts.push(fmtDuration(data.duration));
+          $('#preview-meta').textContent = parts.join(' · ');
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+        hidePreview();
+      }
+    }
+
+    $('#paste-btn').addEventListener('click', async () => {
+      try {
+        const t = await navigator.clipboard.readText();
+        if (t) { $('#url').value = t.trim(); $('#url').dispatchEvent(new Event('input')); toast('Lien collé'); }
+      } catch { toast('Impossible de lire le presse-papier', true); }
+    });
+
+    $('#convert-btn').addEventListener('click', async () => {
+      const url = $('#url').value.trim();
+      if (!url) { toast('Colle d\'abord un lien YouTube', true); return; }
+      const btn = $('#convert-btn');
+      btn.disabled = true;
+      btn.querySelector('span').innerHTML = '<span class="spinner"></span>Préparation…';
+      const st = $('#status');
+      st.classList.add('show');
+      $('#progress-fill').style.width = '0%';
+      $('#status-percent').textContent = '0%';
+      $('#error-msg').style.display = 'none';
+      $('#download-btn').classList.remove('show');
+
+      try {
+        const r = await fetch('/convert', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            url, start: $('#start').value, end: $('#end').value, name: $('#name').value,
+            format: state.convertFormat, quality: state.convertQuality, original: state.convertOriginal,
+          }),
+        });
+        const data = await r.json();
+        if (data.error) {
+          $('#error-msg').textContent = data.error; $('#error-msg').style.display = 'block';
+          btn.disabled = false;
+          btn.querySelector('span').innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><polyline points="19 12 12 19 5 12"/></svg>Convertir';
+          return;
+        }
+        pollConvert(data.job_id);
+      } catch {
+        $('#error-msg').textContent = 'Erreur réseau';
+        $('#error-msg').style.display = 'block';
+        btn.disabled = false;
+      }
+    });
+
+    async function pollConvert(jobId) {
+      const btn = $('#convert-btn');
+      try {
+        const r = await fetch(`/status/${jobId}`);
+        const data = await r.json();
+        if (data.status === 'done') {
+          $('#progress-fill').style.width = '100%';
+          $('#status-percent').textContent = '100%';
+          $('#status-label').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span style="color:#34d399;">Prêt !</span>';
+          $('#download-btn').href = `/download/${jobId}`;
+          $('#download-btn').classList.add('show');
+          $('#download-btn').textContent = `Télécharger ${data.filename || ''}`;
+          btn.disabled = false;
+          btn.querySelector('span').innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><polyline points="19 12 12 19 5 12"/></svg>Convertir';
+          refreshHistory();
+          refreshSounds();
+          return;
+        }
+        if (data.status === 'error') {
+          $('#status-label').innerHTML = '<span style="color:#f87171;">Erreur</span>';
+          $('#error-msg').textContent = data.error || 'Erreur inconnue';
+          $('#error-msg').style.display = 'block';
+          btn.disabled = false;
+          btn.querySelector('span').innerHTML = 'Réessayer';
+          return;
+        }
+        const pct = data.progress || 0;
+        $('#progress-fill').style.width = `${pct}%`;
+        $('#status-percent').textContent = `${Math.round(pct)}%`;
+        const info = data.total_items ? `${data.current_item || 0}/${data.total_items} morceaux` : '';
+        $('#status-label').innerHTML = `<span class="spinner"></span><span>${data.status}</span>`;
+        $('#progress-info').textContent = info;
+        $('#progress-speed').textContent = data.speed || '';
+        setTimeout(() => pollConvert(jobId), 600);
+      } catch {
+        setTimeout(() => pollConvert(jobId), 1500);
+      }
+    }
+
+    async function refreshHistory() {
+      try {
+        const r = await fetch('/history'); const data = await r.json();
+        const items = data.items || [];
+        $('#history-count').textContent = items.length;
+        const list = $('#history-list');
+        if (!items.length) {
+          list.innerHTML = '<div class="empty-state" style="padding:20px;"><p style="font-size:.8rem;">Aucune conversion.</p></div>';
+          return;
+        }
+        list.innerHTML = items.slice(0, 30).map(it => `
+          <div class="ch-item">
+            <div class="ch-thumb">${it.thumbnail ? `<img src="${escapeHtml(it.thumbnail)}" loading="lazy"/>` : ''}</div>
+            <div class="ch-info">
+              <div class="ch-name" title="${escapeHtml(it.title || it.filename)}">${escapeHtml(it.title || it.filename)}</div>
+              <div class="ch-sub">${escapeHtml((it.format||'').toUpperCase())} · ${fmtBytes(it.size)} · ${timeAgo(it.ts)}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch {}
+    }
+
+    // ─── Window controls ─────────────────────────────────────────────────────
+    $('#minimize-btn').addEventListener('click', async () => {
+      try { await window.pywebview.api.hide(); } catch {}
+    });
+
+    // ─── Auto-paste on load ──────────────────────────────────────────────────
+    window.addEventListener('load', async () => {
+      await loadSettings();
+      await loadDevices();
+      await refreshSounds();
+      // periodic refresh for new files added externally
+      setInterval(refreshSounds, 4000);
+
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && YT_RE.test(text.trim()) && !$('#url').value) {
+          $('#url').value = text.trim();
+          $('#url').dispatchEvent(new Event('input'));
+        }
+      } catch {}
+    });
+
+    // Enter to convert
+    $('#url').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); $('#convert-btn').click(); }
+    });
+  </script>
+</body>
+</html>
