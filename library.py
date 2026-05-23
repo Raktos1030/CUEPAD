@@ -3,7 +3,7 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".opus", ".ogg", ".flac", ".aac"}
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".opus", ".ogg", ".flac", ".aac", ".webm"}
 
 
 class Library:
