@@ -5,7 +5,7 @@ mutagen
 sounddevice
 soundfile
 numpy
-pydub
+audiotsm
 pynput
 pystray
 pillow
