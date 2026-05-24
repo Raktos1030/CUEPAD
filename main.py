@@ -3,6 +3,7 @@
 Boots Flask, PyWebView, the global hotkey listener, and the system tray.
 """
 import os
+import shutil
 import socket
 import sys
 import threading
@@ -14,11 +15,32 @@ from pathlib import Path
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys._MEIPASS)
     EXE_DIR = Path(sys.executable).parent
-    FFMPEG_CMD = str(BASE_DIR / "ffmpeg.exe")
 else:
     BASE_DIR = Path(__file__).parent
     EXE_DIR = BASE_DIR
-    FFMPEG_CMD = "ffmpeg"
+
+
+def _find_ffmpeg() -> str:
+    """Locate ffmpeg, preferring bundled binaries over PATH.
+
+    Returns an absolute path if found, otherwise the bare command name so
+    subprocess will at least try PATH at call time.
+    """
+    exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    candidates = [
+        BASE_DIR / exe,              # PyInstaller bundle root
+        EXE_DIR / exe,               # Next to the launched executable
+        BASE_DIR / "ffmpeg" / exe,   # Dev checkout: ./ffmpeg/ffmpeg.exe
+        EXE_DIR / "ffmpeg" / exe,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    found = shutil.which("ffmpeg")
+    return found or exe
+
+
+FFMPEG_CMD = _find_ffmpeg()
 
 DOWNLOADS_DIR = Path.home() / "Downloads" / "Q-Pad Soundboard"
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,7 +84,7 @@ def main():
 
     converter = Converter(downloads_dir=library_dir, ffmpeg_cmd=FFMPEG_CMD)
     library = Library(root=library_dir)
-    audio = AudioEngine(ffmpeg_path=FFMPEG_CMD if Path(FFMPEG_CMD).is_absolute() else None)
+    audio = AudioEngine(ffmpeg_path=FFMPEG_CMD)
     audio.set_global_main(settings.get("volume_main", 1.0))
     audio.set_global_monitor(settings.get("volume_monitor", 0.7))
     audio.set_monitor_muted(
