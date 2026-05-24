@@ -34,44 +34,10 @@ class AudioEngine:
         self._global_monitor = 0.7
         self._mute_monitor = False
 
-        self._configure_pydub(ffmpeg_path)
-
-    def _configure_pydub(self, ffmpeg_path: str | None):
-        """Point pydub at a real ffmpeg/ffprobe binary if we can find one.
-
-        Without this, pydub falls back to spawning the bare names 'ffmpeg'
-        and 'ffprobe', which raises WinError 2 when they're not on PATH —
-        which is exactly what bites .webm/.opus/.m4a playback in dev runs
-        and in any build where ffprobe.exe wasn't bundled alongside
-        ffmpeg.exe.
-        """
-        try:
-            from pydub import AudioSegment
-            from pydub.utils import which
-        except Exception:
-            return
-
-        resolved = None
         if ffmpeg_path:
             p = Path(ffmpeg_path)
             if p.is_absolute() and p.exists():
-                resolved = str(p)
-        if resolved is None:
-            resolved = which("ffmpeg")
-        if resolved:
-            AudioSegment.converter = resolved
-            self.ffmpeg_path = resolved
-
-        probe = None
-        if resolved:
-            r = Path(resolved)
-            sibling = r.with_name("ffprobe.exe" if r.suffix.lower() == ".exe" else "ffprobe")
-            if sibling.exists():
-                probe = str(sibling)
-        if probe is None:
-            probe = which("ffprobe")
-        if probe:
-            AudioSegment.ffprobe = probe
+                self.ffmpeg_path = str(p)
 
     # ─── Live state setters (called from /settings) ────────────────────────
     def set_global_main(self, v: float):
@@ -259,35 +225,37 @@ class AudioEngine:
         except Exception as sf_err:
             sf_msg = str(sf_err)
 
-        # Fallback: pydub via ffmpeg (m4a/opus/aac/webm and old libsndfile).
-        # Pass the extension as a format hint so pydub skips the ffprobe
-        # auto-detection step — that's the part that raises WinError 2 when
-        # ffprobe.exe isn't sitting next to ffmpeg.exe.
-        ext = Path(file_path).suffix.lstrip(".").lower() or None
+        # Fallback: shell out to ffmpeg ourselves (m4a/opus/aac/webm and
+        # old libsndfile). We used to go through pydub here, but pydub's
+        # `from_file` calls ffprobe even with format=hint — and ffprobe.exe
+        # isn't always bundled. Direct ffmpeg → wav → soundfile skips that.
+        import io
+        import subprocess
+        ext = Path(file_path).suffix.lstrip(".").lower() or "?"
+        ffmpeg = self.ffmpeg_path or "ffmpeg"
         try:
-            import numpy as np
-            from pydub import AudioSegment
-            audio = AudioSegment.from_file(file_path, format=ext)
-            sr = audio.frame_rate
-            channels = audio.channels
-            samples = np.array(audio.get_array_of_samples())
-            if channels > 1:
-                samples = samples.reshape((-1, channels))
-            else:
-                samples = samples.reshape((-1, 1))
-            max_val = float(1 << (8 * audio.sample_width - 1))
-            samples = samples.astype(np.float32) / max_val
-            return samples, sr, channels
-        except FileNotFoundError as pd_err:
-            from pydub import AudioSegment
-            tried = AudioSegment.converter
+            proc = subprocess.run(
+                [ffmpeg, "-y", "-i", file_path, "-vn", "-f", "wav", "-"],
+                capture_output=True,
+            )
+        except FileNotFoundError as ff_err:
             raise RuntimeError(
-                f"FFmpeg introuvable — requis pour décoder .{ext or '?'}. "
+                f"FFmpeg introuvable — requis pour décoder .{ext}. "
                 f"Réinstallez Q-Pad ou ajoutez ffmpeg au PATH système. "
-                f"(testé: {tried!r}; soundfile: {sf_msg})"
-            ) from pd_err
-        except Exception as pd_err:
+                f"(testé: {ffmpeg!r}; soundfile: {sf_msg})"
+            ) from ff_err
+        if proc.returncode != 0:
+            tail = proc.stderr[-400:].decode("utf-8", errors="replace").strip()
             raise RuntimeError(
-                f"soundfile: {sf_msg} | pydub: {pd_err} "
-                f"(ffmpeg requis pour ce format)"
+                f"ffmpeg a renvoyé {proc.returncode}: {tail} "
+                f"(soundfile: {sf_msg})"
+            )
+        try:
+            import soundfile as sf
+            data, sr = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
+            return data, int(sr), int(data.shape[1])
+        except Exception as sf2:
+            raise RuntimeError(
+                f"Lecture WAV depuis ffmpeg a échoué: {sf2} "
+                f"(soundfile initial: {sf_msg})"
             )
