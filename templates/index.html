@@ -934,6 +934,12 @@
       display: inline-flex; align-items: center; gap: 6px;
     }
     .player-head button:hover { background: var(--surface-3); }
+    .player-head .player-head-toggle {
+      padding: 0; width: 26px; height: 26px;
+      display: inline-grid; place-items: center;
+      color: var(--text-2);
+    }
+    .player-head .player-head-toggle svg { width: 13px; height: 13px; }
     .player-head button.stop { color: var(--error); border-color: rgba(255, 90, 110, 0.4); }
     .player-head button.stop:hover { background: rgba(255, 90, 110, 0.1); }
     .player-head button svg { width: 11px; height: 11px; }
@@ -1276,6 +1282,11 @@
     <!-- Expanded header: visible only when more than one voice is playing OR
          the user has manually expanded the list. -->
     <div class="player-head" id="player-head" style="display:none;">
+      <button class="player-head-toggle" id="player-toggle-btn" title="Déplier / replier">
+        <svg id="player-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 15 12 9 18 15"/>
+        </svg>
+      </button>
       <span class="count" id="player-count">0</span>
       <span id="player-count-label">SONS EN COURS</span>
       <span class="spacer"></span>
@@ -1314,6 +1325,7 @@
       voices: [],
       pollTimer: null,
       playerExpanded: false,
+      draggingId: null,
       convertFormat: 'mp3',
       convertQuality: '320',
       convertOriginal: false,
@@ -1348,7 +1360,13 @@
       }
     }
     function refreshLcd() {
-      const n = (state.voices && state.voices.length) || $$('.sound-btn.playing').length;
+      // Take the max of the click-feedback class (instant) and the polled
+      // voice list (authoritative). `||` short-circuits on truthy 1 and
+      // ignores 2 — using Math.max keeps both sources honest.
+      const n = Math.max(
+        (state.voices && state.voices.length) || 0,
+        $$('.sound-btn.playing').length,
+      );
       if (n > 0) setLcd(`▶ ${n} VOICE${n > 1 ? 'S' : ''}`, 'busy');
       else       setLcd('READY', 'idle');
     }
@@ -1659,17 +1677,16 @@
       // Build/update each row.
       list.forEach((v, idx) => {
         const isCompactRow = !expanded && idx === 0;
-        const isPrimary = idx === 0;  // primary row hosts the expand chevron
         let row = existing.get(v.id);
         if (!row) {
           row = document.createElement('div');
           row.className = 'player-row';
           row.dataset.id = v.id;
-          row.innerHTML = playerRowHtml(v, isPrimary);
+          row.innerHTML = playerRowHtml(v);
           rows.appendChild(row);
           wirePlayerRow(row);
         } else {
-          updatePlayerRow(row, v, isPrimary);
+          updatePlayerRow(row, v);
         }
         row.classList.toggle('compact', isCompactRow);
         row.classList.toggle('paused', v.paused);
@@ -1679,7 +1696,15 @@
       if (voices.length > 1) {
         head.style.display = 'flex';
         $('#player-count').textContent = voices.length;
-        $('#player-count-label').textContent = voices.length > 1 ? 'SONS EN COURS' : 'SON EN COURS';
+        $('#player-count-label').textContent = 'SONS EN COURS';
+        // Chevron: ▲ when expanded (= click to collapse), ▼ when collapsed.
+        const ico = $('#player-toggle-icon');
+        if (ico) {
+          ico.innerHTML = state.playerExpanded
+            ? '<polyline points="6 9 12 15 18 9"/>'
+            : '<polyline points="6 15 12 9 18 15"/>';
+          ico.parentElement.title = state.playerExpanded ? 'Replier' : 'Déplier la liste';
+        }
         const anyPaused = voices.some(v => v.paused);
         const allPaused = voices.every(v => v.paused);
         $('#player-pause-all').style.display = allPaused ? 'none' : 'inline-flex';
@@ -1687,17 +1712,13 @@
       } else {
         head.style.display = 'none';
       }
+
+      // Keep the LCD count in lockstep with the player header — both should
+      // tick at the same moment a /voices poll returns.
+      refreshLcd();
     }
 
-    function playerRowHtml(v, isCompact) {
-      const expandBtn = (state.voices.length > 1 && isCompact) ? `
-        <button class="player-btn expand" data-act="expand" title="${state.playerExpanded ? 'Réduire' : 'Voir tous les sons'}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-            ${state.playerExpanded
-              ? '<polyline points="6 15 12 9 18 15"/>'
-              : '<polyline points="6 9 12 15 18 9"/>'}
-          </svg>
-        </button>` : '';
+    function playerRowHtml(v) {
       const playIcon = v.paused
         ? '<polygon points="6 4 20 12 6 20 6 4"/>'
         : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
@@ -1707,7 +1728,6 @@
       const speedCls = v.speed !== 1.0 ? 'off-1' : '';
       return `
         <div class="player-name">
-          ${expandBtn}
           <span class="name-text" title="${escapeAttr(v.name)}">${escapeHtml(v.name)}</span>
         </div>
         <button class="player-btn" data-act="toggle" title="${v.paused ? 'Reprendre' : 'Pause'}">
@@ -1729,16 +1749,17 @@
       `;
     }
 
-    function updatePlayerRow(row, v, isCompact) {
-      // Cheap in-place updates so the user can interact without flicker.
-      row.classList.toggle('compact', isCompact);
+    function updatePlayerRow(row, v) {
       row.classList.toggle('paused', v.paused);
-      const fill = row.querySelector('.player-fill');
-      if (fill) fill.style.width = pctOf(v) + '%';
+      // Don't snap the scrub bar back while the user is dragging it.
+      if (state.draggingId !== row.dataset.id) {
+        const fill = row.querySelector('.player-fill');
+        if (fill) fill.style.width = pctOf(v) + '%';
+        const cur = row.querySelector('[data-time="cur"]');
+        if (cur) cur.textContent = fmtClock(v.pos_sec);
+      }
       const bar = row.querySelector('.player-bar');
       if (bar) bar.classList.toggle('paused', v.paused);
-      const cur = row.querySelector('[data-time="cur"]');
-      if (cur) cur.textContent = fmtClock(v.pos_sec);
       const dur = row.querySelector('[data-time="dur"]');
       if (dur) dur.textContent = fmtClock(v.dur_sec);
       const toggleBtn = row.querySelector('[data-act="toggle"]');
@@ -1753,17 +1774,6 @@
         speed.value = String(v.speed);
         speed.classList.toggle('off-1', v.speed !== 1.0);
       }
-      // The expand button only lives on the compact row when there are
-      // multiple voices — if that count changed, re-render its slot.
-      const nameEl = row.querySelector('.player-name');
-      const hasExpandBtn = !!nameEl.querySelector('[data-act="expand"]');
-      const needExpandBtn = isCompact && state.voices.length > 1;
-      if (hasExpandBtn !== needExpandBtn) {
-        row.innerHTML = playerRowHtml(v, isCompact);
-        wirePlayerRow(row);
-        row.classList.toggle('compact', isCompact);
-        row.classList.toggle('paused', v.paused);
-      }
     }
 
     function pctOf(v) {
@@ -1777,12 +1787,6 @@
         if (!t) return;
         const act = t.dataset.act;
         const id = row.dataset.id;
-        if (act === 'expand') {
-          state.playerExpanded = !state.playerExpanded;
-          // Force a re-render now; next poll will refresh.
-          renderPlayer();
-          return;
-        }
         if (act === 'toggle') {
           const v = state.voices.find(x => x.id === id);
           if (!v) return;
@@ -1795,30 +1799,18 @@
           await fetch(`/voices/${id}/stop`, {method: 'POST'});
           state.voices = state.voices.filter(x => x.id !== id);
           renderPlayer();
-          return;
-        }
-        if (act === 'seek') {
-          const v = state.voices.find(x => x.id === id);
-          if (!v || !v.dur_sec) return;
-          const bar = t;
-          const rect = bar.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const frac = Math.max(0, Math.min(1, x / rect.width));
-          const pos = frac * v.dur_sec;
-          await fetch(`/voices/${id}/seek`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({pos}),
-          });
-          v.pos_sec = pos;
-          renderPlayer();
         }
       });
+
+      // Scrub bar: click-to-seek + drag-to-scrub via pointer events.
+      const bar = row.querySelector('[data-act="seek"]');
+      if (bar) wireScrub(bar, row);
+
       row.addEventListener('change', async e => {
         const t = e.target.closest('[data-act="speed"]');
         if (!t) return;
         const id = row.dataset.id;
         const speed = parseFloat(t.value);
-        // Compute UX delay hint — time-stretching a 30s clip takes a bit.
         const v = state.voices.find(x => x.id === id);
         if (v) v.speed = speed;
         t.classList.toggle('off-1', speed !== 1.0);
@@ -1831,6 +1823,81 @@
       });
     }
 
+    function wireScrub(bar, row) {
+      const fill = bar.querySelector('.player-fill');
+      const cur  = row.querySelector('[data-time="cur"]');
+      let dragging = false;
+      let lastSeekTs = 0;
+      let pendingSeek = null;
+
+      const fracFromEvent = (e) => {
+        const r = bar.getBoundingClientRect();
+        return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      };
+      const currentVoice = () => state.voices.find(x => x.id === row.dataset.id);
+      const flushPending = async () => {
+        if (pendingSeek === null) return;
+        const v = currentVoice();
+        if (!v) { pendingSeek = null; return; }
+        const pos = pendingSeek;
+        pendingSeek = null;
+        v.pos_sec = pos;
+        try {
+          await fetch(`/voices/${v.id}/seek`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({pos}),
+          });
+        } catch {}
+      };
+
+      bar.addEventListener('pointerdown', e => {
+        const v = currentVoice();
+        if (!v || !v.dur_sec) return;
+        dragging = true;
+        state.draggingId = row.dataset.id;
+        bar.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        const frac = fracFromEvent(e);
+        fill.style.width = (frac * 100) + '%';
+        if (cur) cur.textContent = fmtClock(frac * v.dur_sec);
+        pendingSeek = frac * v.dur_sec;
+        lastSeekTs = Date.now();
+        flushPending();
+      });
+
+      bar.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        const v = currentVoice();
+        if (!v || !v.dur_sec) return;
+        const frac = fracFromEvent(e);
+        fill.style.width = (frac * 100) + '%';
+        if (cur) cur.textContent = fmtClock(frac * v.dur_sec);
+        pendingSeek = frac * v.dur_sec;
+        const now = Date.now();
+        if (now - lastSeekTs >= 80) {
+          lastSeekTs = now;
+          flushPending();
+        }
+      });
+
+      const finishDrag = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        try { bar.releasePointerCapture(e.pointerId); } catch {}
+        flushPending();
+        // Stay sticky for one more poll cycle so the freshly-seeked position
+        // isn't overwritten by stale data the audio thread hasn't applied yet.
+        const id = row.dataset.id;
+        setTimeout(() => { if (state.draggingId === id) state.draggingId = null; }, 350);
+      };
+      bar.addEventListener('pointerup', finishDrag);
+      bar.addEventListener('pointercancel', finishDrag);
+    }
+
+    $('#player-toggle-btn').addEventListener('click', () => {
+      state.playerExpanded = !state.playerExpanded;
+      renderPlayer();
+    });
     $('#player-pause-all').addEventListener('click', async () => {
       await fetch('/voices/pause-all', {method: 'POST'});
       state.voices.forEach(v => v.paused = true);
