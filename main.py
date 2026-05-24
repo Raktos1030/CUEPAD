@@ -28,14 +28,28 @@ def _find_ffmpeg() -> str:
     """
     exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
     candidates = [
-        BASE_DIR / exe,              # PyInstaller bundle root
-        EXE_DIR / exe,               # Next to the launched executable
-        BASE_DIR / "ffmpeg" / exe,   # Dev checkout: ./ffmpeg/ffmpeg.exe
+        BASE_DIR / exe,                    # PyInstaller bundle root / contents dir
+        EXE_DIR / exe,                     # Next to the launched executable
+        EXE_DIR / "_internal" / exe,       # PyInstaller 6+ onedir layout
+        BASE_DIR / "_internal" / exe,
+        BASE_DIR / "ffmpeg" / exe,         # Dev checkout: ./ffmpeg/ffmpeg.exe
         EXE_DIR / "ffmpeg" / exe,
     ]
     for c in candidates:
         if c.is_file():
             return str(c)
+
+    # Last resort: scan the install / project tree. Cheap one-time cost at
+    # startup, and it catches the layouts our hand-picked candidates miss
+    # (different PyInstaller versions move the contents dir around).
+    for root in (EXE_DIR, BASE_DIR):
+        try:
+            for c in root.rglob(exe):
+                if c.is_file():
+                    return str(c)
+        except Exception:
+            pass
+
     found = shutil.which("ffmpeg")
     return found or exe
 
