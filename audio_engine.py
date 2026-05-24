@@ -279,10 +279,12 @@ class AudioEngine:
             samples = samples.astype(np.float32) / max_val
             return samples, sr, channels
         except FileNotFoundError as pd_err:
+            from pydub import AudioSegment
+            tried = AudioSegment.converter
             raise RuntimeError(
                 f"FFmpeg introuvable — requis pour décoder .{ext or '?'}. "
                 f"Réinstallez Q-Pad ou ajoutez ffmpeg au PATH système. "
-                f"(soundfile: {sf_msg})"
+                f"(testé: {tried!r}; soundfile: {sf_msg})"
             ) from pd_err
         except Exception as pd_err:
             raise RuntimeError(
