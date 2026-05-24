@@ -303,10 +303,10 @@ class AudioEngine:
 
     def stop(self, pb_id: str) -> bool:
         with self._lock:
-            pb = self._playbacks.get(pb_id)
+            pb = self._playbacks.pop(pb_id, None)
         if not pb:
             return False
-        self._stop_playback(pb)
+        self._silence_and_teardown([pb])
         return True
 
     def seek(self, pb_id: str, pos_sec: float) -> bool:
@@ -365,19 +365,37 @@ class AudioEngine:
     def stop_all(self):
         with self._lock:
             pbs = list(self._playbacks.values())
-        for pb in pbs:
-            self._stop_playback(pb)
+            self._playbacks.clear()
+        self._silence_and_teardown(pbs)
 
-    def _stop_playback(self, pb: Playback):
-        pb.paused = True  # silence the callback while we close
-        for v in list(pb.voices):
-            try: v.stream.stop()
+    def _silence_and_teardown(self, pbs: list[Playback]):
+        """Two-phase stop: kill the audio output immediately, sweep streams later.
+
+        sounddevice's OutputStream.stop()/close() block for a buffer-drain's
+        worth of time — sequencing them per-voice is what made 'Stop tout'
+        feel staggered. Flipping `paused=True` first means the callback
+        emits zeros within one tick (~10 ms), so the user hears silence
+        instantly. The actual stream teardown happens off-thread.
+        """
+        if not pbs:
+            return
+        streams = []
+        for pb in pbs:
+            pb.paused = True
+            streams.extend(v.stream for v in pb.voices)
+            pb.voices = []
+        if streams:
+            threading.Thread(
+                target=self._teardown_streams, args=(streams,), daemon=True,
+            ).start()
+
+    @staticmethod
+    def _teardown_streams(streams):
+        for s in streams:
+            try: s.stop()
             except Exception: pass
-            try: v.stream.close()
+            try: s.close()
             except Exception: pass
-        pb.voices = []
-        with self._lock:
-            self._playbacks.pop(pb.id, None)
 
     # ─── Decode (ffmpeg subprocess → soundfile) ────────────────────────────
     def _decode(self, file_path: str):
