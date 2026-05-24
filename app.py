@@ -139,19 +139,75 @@ def sound_play():
     sett = services["settings"]
     per_vol = float(sett.sound(filename).get("volume", 1.0))
 
-    ok, err = services["audio"].play(
+    ok, err, pb_id = services["audio"].play(
         str(path),
         device_main=sett.get("output_main"),
         device_monitor=sett.get("output_monitor"),
         per_sound_gain=per_vol,
         monitor_enabled=bool(sett.get("monitor_enabled", True)),
+        name=Path(filename).stem,
     )
-    return jsonify({"ok": ok, "error": err})
+    return jsonify({"ok": ok, "error": err, "id": pb_id})
 
 
 @app.route("/sounds/stop", methods=["POST"])
 def sound_stop():
     services["audio"].stop_all()
+    return jsonify({"ok": True})
+
+
+# ─────────────────────────── Voices (live playback control) ───────────────
+
+@app.route("/voices")
+def voices_list():
+    return jsonify({"items": services["audio"].list_playbacks()})
+
+
+@app.route("/voices/<pb_id>/pause", methods=["POST"])
+def voice_pause(pb_id):
+    return jsonify({"ok": services["audio"].pause(pb_id)})
+
+
+@app.route("/voices/<pb_id>/resume", methods=["POST"])
+def voice_resume(pb_id):
+    return jsonify({"ok": services["audio"].resume(pb_id)})
+
+
+@app.route("/voices/<pb_id>/stop", methods=["POST"])
+def voice_stop(pb_id):
+    return jsonify({"ok": services["audio"].stop(pb_id)})
+
+
+@app.route("/voices/<pb_id>/seek", methods=["POST"])
+def voice_seek(pb_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        pos = float(data.get("pos", 0))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid pos"}), 400
+    return jsonify({"ok": services["audio"].seek(pb_id, pos)})
+
+
+@app.route("/voices/<pb_id>/speed", methods=["POST"])
+def voice_speed(pb_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        speed = float(data.get("speed", 1.0))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid speed"}), 400
+    ok = services["audio"].set_speed(pb_id, speed)
+    return jsonify({"ok": ok})
+
+
+@app.route("/voices/pause-all", methods=["POST"])
+def voices_pause_all():
+    services["audio"].pause_all()
+    return jsonify({"ok": True})
+
+
+@app.route("/voices/resume-all", methods=["POST"])
+def voices_resume_all():
+    services["audio"].resume_all()
     return jsonify({"ok": True})
 
 
@@ -316,6 +372,7 @@ def _play_callback(filename: str):
             device_monitor=sett.get("output_monitor"),
             per_sound_gain=per_vol,
             monitor_enabled=bool(sett.get("monitor_enabled", True)),
+            name=Path(filename).stem,
         )  # tuple result ignored — hotkeys are fire-and-forget
     return cb
 

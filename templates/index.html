@@ -228,10 +228,11 @@
 
     /* ─── Soundboard toolbar ─── */
     .sb-toolbar {
-      display: grid; grid-template-columns: 1fr 1fr 1.2fr auto; gap: 16px;
+      display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(0, 1fr) auto;
+      gap: 16px;
       margin-bottom: 18px; align-items: end;
     }
-    .sb-toolbar .group { display: flex; flex-direction: column; gap: 7px; }
+    .sb-toolbar .group { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
     .sb-actions { display: flex; gap: 6px; align-items: end; }
 
     .select, .text-input, .url-input {
@@ -243,7 +244,9 @@
       outline: none; width: 100%;
       transition: border-color 0.12s, background 0.12s;
     }
-    .select { padding-right: 28px; appearance: none; -webkit-appearance: none;
+    .select {
+      padding-right: 28px; appearance: none; -webkit-appearance: none;
+      text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
       background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a7593' stroke-width='2.5' stroke-linecap='round'><polyline points='6 9 12 15 18 9'/></svg>");
       background-repeat: no-repeat; background-position: right 10px center;
     }
@@ -801,6 +804,149 @@
     }
     .toast.error::before { background: var(--error); box-shadow: 0 0 6px var(--error); }
 
+    /* ─── Mini-player (sticky bottom transport bar) ─── */
+    .player {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+      background: linear-gradient(180deg, var(--surface) 0%, var(--bg-2) 100%);
+      border-top: 1px solid var(--line-strong);
+      box-shadow:
+        0 -1px 0 rgba(255,255,255,0.04) inset,
+        0 -8px 24px rgba(0,0,0,0.45);
+      transform: translateY(100%); transition: transform 0.28s cubic-bezier(0.4, 0, 0.1, 1);
+      max-height: 60vh; display: flex; flex-direction: column;
+    }
+    .player.show { transform: translateY(0); }
+    /* When the player is up, leave room above so content doesn't hide behind it. */
+    body.has-player .content { padding-bottom: 84px; }
+
+    .player-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1.2fr) auto auto minmax(0, 3fr) auto auto;
+      gap: 14px; align-items: center;
+      padding: 10px 18px;
+      min-height: 56px;
+    }
+    .player-row + .player-row { border-top: 1px solid var(--line); }
+
+    /* Compact (first row) gets a subtle pink LED strip on its top edge */
+    .player-row.compact { position: relative; }
+    .player-row.compact::before {
+      content: ''; position: absolute; top: 0; left: 24px; right: 24px; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--led-pink), transparent);
+      opacity: 0.5;
+    }
+
+    .player-name {
+      display: flex; align-items: center; gap: 10px;
+      font-family: var(--f-display); font-weight: 600; font-size: 0.88rem;
+      color: var(--text);
+      overflow: hidden;
+    }
+    .player-name .pad-num {
+      font-family: var(--f-mono); font-size: 0.62rem; font-weight: 600;
+      color: var(--led-pink); padding: 2px 5px;
+      background: rgba(255, 59, 133, 0.1); border: 1px solid rgba(255, 59, 133, 0.25);
+      border-radius: 2px; flex-shrink: 0;
+    }
+    .player-name .name-text {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      min-width: 0;
+    }
+
+    .player-btn {
+      background: var(--surface-2); border: 1px solid var(--line-strong);
+      border-bottom-color: var(--bg);
+      width: 34px; height: 34px; border-radius: 5px;
+      display: grid; place-items: center; cursor: pointer;
+      color: var(--text);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 1px 2px rgba(0,0,0,0.3);
+      transition: background 0.1s, transform 0.05s;
+    }
+    .player-btn:hover { background: var(--surface-3); }
+    .player-btn:active { transform: translateY(1px); }
+    .player-btn svg { width: 14px; height: 14px; }
+    .player-btn.stop { color: var(--error); border-color: rgba(255, 90, 110, 0.4); }
+    .player-btn.stop:hover { background: rgba(255, 90, 110, 0.1); }
+    .player-btn.expand { width: 28px; height: 28px; color: var(--text-2); }
+
+    .player-speed {
+      background: var(--bg-2); border: 1px solid var(--line); color: var(--text);
+      font-family: var(--f-mono); font-size: 0.74rem; font-weight: 600;
+      padding: 6px 10px; border-radius: 4px; cursor: pointer; outline: none;
+      appearance: none; -webkit-appearance: none;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23807593' stroke-width='2.5' stroke-linecap='round'><polyline points='6 9 12 15 18 9'/></svg>");
+      background-repeat: no-repeat; background-position: right 6px center;
+      padding-right: 22px;
+    }
+    .player-speed:hover { background-color: var(--surface-2); }
+    .player-speed:focus { border-color: var(--led-violet); }
+    .player-speed.off-1 { color: var(--led-amber); border-color: rgba(255, 182, 72, 0.4); }
+
+    .player-progress {
+      display: flex; align-items: center; gap: 10px;
+      min-width: 0;
+    }
+    .player-time {
+      font-family: var(--f-mono); font-size: 0.72rem; color: var(--text-2);
+      font-variant-numeric: tabular-nums; min-width: 38px; text-align: center;
+      flex-shrink: 0;
+    }
+    .player-bar {
+      flex: 1; height: 6px; min-width: 60px;
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: 3px; cursor: pointer; position: relative; overflow: hidden;
+    }
+    .player-bar:hover { border-color: var(--line-strong); }
+    .player-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--led-pink), var(--led-violet));
+      box-shadow: 0 0 8px rgba(255, 59, 133, 0.5);
+      transition: width 0.12s linear;
+      pointer-events: none;
+    }
+    .player-bar.paused .player-fill {
+      background: var(--surface-hi);
+      box-shadow: none;
+    }
+
+    /* Expanded header */
+    .player-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-2);
+      font-family: var(--f-mono); font-size: 0.7rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-2);
+    }
+    .player-head .count {
+      color: var(--led-pink);
+      padding: 2px 6px; background: rgba(255, 59, 133, 0.1);
+      border: 1px solid rgba(255, 59, 133, 0.25); border-radius: 2px;
+    }
+    .player-head .spacer { flex: 1; }
+    .player-head button {
+      background: var(--surface-2); border: 1px solid var(--line-strong);
+      border-bottom-color: var(--bg);
+      padding: 5px 10px; border-radius: 4px; cursor: pointer;
+      color: var(--text); font-family: var(--f-mono); font-size: 0.68rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .player-head button:hover { background: var(--surface-3); }
+    .player-head button.stop { color: var(--error); border-color: rgba(255, 90, 110, 0.4); }
+    .player-head button.stop:hover { background: rgba(255, 90, 110, 0.1); }
+    .player-head button svg { width: 11px; height: 11px; }
+
+    .player-list {
+      overflow-y: auto;
+      max-height: calc(60vh - 56px - 38px);
+    }
+
+    /* Paused row: dim the name a touch */
+    .player-row.paused .player-name { color: var(--text-2); }
+    .player-row.paused .player-name .name-text { opacity: 0.7; }
+
     /* ─── Misc ─── */
     .badge {
       display: inline-block; padding: 2px 6px; border-radius: 2px;
@@ -1125,6 +1271,31 @@
     </div>
   </div>
 
+  <!-- ═══════════════ MINI-PLAYER (sticky bottom transport) ═══════════════ -->
+  <div class="player" id="player">
+    <!-- Expanded header: visible only when more than one voice is playing OR
+         the user has manually expanded the list. -->
+    <div class="player-head" id="player-head" style="display:none;">
+      <span class="count" id="player-count">0</span>
+      <span id="player-count-label">SONS EN COURS</span>
+      <span class="spacer"></span>
+      <button id="player-pause-all" title="Pause global">
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        PAUSE TOUT
+      </button>
+      <button id="player-resume-all" style="display:none;" title="Reprendre tout">
+        <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+        REPRENDRE
+      </button>
+      <button id="player-stop-all" class="stop" title="Stop global">
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+        STOP TOUT
+      </button>
+    </div>
+    <!-- The compact row (last voice) and any expanded rows go here. -->
+    <div id="player-rows"></div>
+  </div>
+
   <div class="toast" id="toast">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
     <span id="toast-text"></span>
@@ -1140,6 +1311,9 @@
       sounds: [],
       devices: [],
       playingTimers: new Map(),
+      voices: [],
+      pollTimer: null,
+      playerExpanded: false,
       convertFormat: 'mp3',
       convertQuality: '320',
       convertOriginal: false,
@@ -1174,9 +1348,9 @@
       }
     }
     function refreshLcd() {
-      const playing = $$('.sound-btn.playing').length;
-      if (playing > 0) setLcd(`▶ ${playing} VOICE${playing > 1 ? 'S' : ''}`, 'busy');
-      else             setLcd('READY', 'idle');
+      const n = (state.voices && state.voices.length) || $$('.sound-btn.playing').length;
+      if (n > 0) setLcd(`▶ ${n} VOICE${n > 1 ? 'S' : ''}`, 'busy');
+      else       setLcd('READY', 'idle');
     }
 
     // ─── Tabs ────────────────────────────────────────────────────────────────
@@ -1262,7 +1436,7 @@
       const fill = (selectEl, currentVal) => {
         selectEl.innerHTML = '<option value="">— Système par défaut —</option>' +
           state.devices.map(d => {
-            const tag = d.virtual ? ' 🎙️' : (d.default ? ' (défaut)' : '');
+            const tag = d.virtual ? ' [VIRTUEL]' : (d.default ? ' [DÉFAUT]' : '');
             return `<option value="${d.id}" ${currentVal == d.id ? 'selected' : ''}>${escapeHtml(d.name)}${tag}</option>`;
           }).join('');
       };
@@ -1391,6 +1565,10 @@
         if (!data.ok) {
           toast(data.error || 'Lecture impossible', true);
           setLcd('ERR DECODE', 'error', 2500);
+        } else {
+          // Push a placeholder so the player slides in instantly; the next
+          // /voices poll will replace it with the real data.
+          startPlayerPoll();
         }
       } catch {
         toast('Erreur de lecture', true);
@@ -1403,8 +1581,268 @@
       $$('.sound-btn.playing').forEach(b => b.classList.remove('playing'));
       state.playingTimers.forEach(t => clearTimeout(t));
       state.playingTimers.clear();
+      state.voices = [];
+      renderPlayer();
       refreshLcd();
       toast('Tous les sons arrêtés');
+    });
+
+    // ─── Mini-player ────────────────────────────────────────────────────────
+    const SPEEDS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+    function fmtClock(s) {
+      s = Math.max(0, Math.floor(s));
+      const m = Math.floor(s / 60), sec = s % 60;
+      return `${m}:${String(sec).padStart(2, '0')}`;
+    }
+    function escapeAttr(s) {
+      return (s || '').replace(/"/g, '&quot;');
+    }
+    function fmtSpeed(s) {
+      return Number(s).toFixed(s % 1 === 0 ? 1 : 2).replace(/\.?0+$/, m => m === '.0' ? '' : m) + '×';
+    }
+
+    function startPlayerPoll() {
+      if (state.pollTimer) return;
+      const tick = async () => {
+        try {
+          const r = await fetch('/voices');
+          const d = await r.json();
+          state.voices = d.items || [];
+        } catch {
+          state.voices = [];
+        }
+        renderPlayer();
+        if (!state.voices.length) {
+          clearInterval(state.pollTimer);
+          state.pollTimer = null;
+        }
+      };
+      tick();
+      state.pollTimer = setInterval(tick, 250);
+    }
+
+    function renderPlayer() {
+      const root = $('#player');
+      const rows = $('#player-rows');
+      const head = $('#player-head');
+      const voices = state.voices || [];
+
+      if (!voices.length) {
+        root.classList.remove('show');
+        document.body.classList.remove('has-player');
+        rows.innerHTML = '';
+        head.style.display = 'none';
+        refreshLcd();
+        return;
+      }
+
+      root.classList.add('show');
+      document.body.classList.add('has-player');
+
+      // Decide what to render: compact (just the most recent) OR expanded (all).
+      // Auto-collapse to compact when only one voice is left, regardless of
+      // the prior user-toggled state.
+      const expanded = state.playerExpanded && voices.length > 1;
+      const list = expanded
+        ? [...voices].reverse()
+        : [voices[voices.length - 1]];
+
+      // Update or build rows in place so input focus / hover isn't lost.
+      const wantedIds = list.map(v => v.id);
+      const existing = new Map();
+      rows.querySelectorAll('.player-row').forEach(el => existing.set(el.dataset.id, el));
+
+      // Remove rows that no longer apply.
+      existing.forEach((el, id) => { if (!wantedIds.includes(id)) el.remove(); });
+
+      // Build/update each row.
+      list.forEach((v, idx) => {
+        const isCompactRow = !expanded && idx === 0;
+        const isPrimary = idx === 0;  // primary row hosts the expand chevron
+        let row = existing.get(v.id);
+        if (!row) {
+          row = document.createElement('div');
+          row.className = 'player-row';
+          row.dataset.id = v.id;
+          row.innerHTML = playerRowHtml(v, isPrimary);
+          rows.appendChild(row);
+          wirePlayerRow(row);
+        } else {
+          updatePlayerRow(row, v, isPrimary);
+        }
+        row.classList.toggle('compact', isCompactRow);
+        row.classList.toggle('paused', v.paused);
+      });
+
+      // Header: show only when there are multiple voices.
+      if (voices.length > 1) {
+        head.style.display = 'flex';
+        $('#player-count').textContent = voices.length;
+        $('#player-count-label').textContent = voices.length > 1 ? 'SONS EN COURS' : 'SON EN COURS';
+        const anyPaused = voices.some(v => v.paused);
+        const allPaused = voices.every(v => v.paused);
+        $('#player-pause-all').style.display = allPaused ? 'none' : 'inline-flex';
+        $('#player-resume-all').style.display = anyPaused ? 'inline-flex' : 'none';
+      } else {
+        head.style.display = 'none';
+      }
+    }
+
+    function playerRowHtml(v, isCompact) {
+      const expandBtn = (state.voices.length > 1 && isCompact) ? `
+        <button class="player-btn expand" data-act="expand" title="${state.playerExpanded ? 'Réduire' : 'Voir tous les sons'}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            ${state.playerExpanded
+              ? '<polyline points="6 15 12 9 18 15"/>'
+              : '<polyline points="6 9 12 15 18 9"/>'}
+          </svg>
+        </button>` : '';
+      const playIcon = v.paused
+        ? '<polygon points="6 4 20 12 6 20 6 4"/>'
+        : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+      const speedOpts = SPEEDS.map(s =>
+        `<option value="${s}" ${s === v.speed ? 'selected' : ''}>${fmtSpeed(s)}</option>`
+      ).join('');
+      const speedCls = v.speed !== 1.0 ? 'off-1' : '';
+      return `
+        <div class="player-name">
+          ${expandBtn}
+          <span class="name-text" title="${escapeAttr(v.name)}">${escapeHtml(v.name)}</span>
+        </div>
+        <button class="player-btn" data-act="toggle" title="${v.paused ? 'Reprendre' : 'Pause'}">
+          <svg viewBox="0 0 24 24" fill="currentColor">${playIcon}</svg>
+        </button>
+        <select class="player-speed ${speedCls}" data-act="speed" title="Vitesse (pitch préservé)">
+          ${speedOpts}
+        </select>
+        <div class="player-progress">
+          <span class="player-time" data-time="cur">${fmtClock(v.pos_sec)}</span>
+          <div class="player-bar ${v.paused ? 'paused' : ''}" data-act="seek">
+            <div class="player-fill" style="width:${pctOf(v)}%"></div>
+          </div>
+          <span class="player-time" data-time="dur">${fmtClock(v.dur_sec)}</span>
+        </div>
+        <button class="player-btn stop" data-act="stop" title="Stop">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+        </button>
+      `;
+    }
+
+    function updatePlayerRow(row, v, isCompact) {
+      // Cheap in-place updates so the user can interact without flicker.
+      row.classList.toggle('compact', isCompact);
+      row.classList.toggle('paused', v.paused);
+      const fill = row.querySelector('.player-fill');
+      if (fill) fill.style.width = pctOf(v) + '%';
+      const bar = row.querySelector('.player-bar');
+      if (bar) bar.classList.toggle('paused', v.paused);
+      const cur = row.querySelector('[data-time="cur"]');
+      if (cur) cur.textContent = fmtClock(v.pos_sec);
+      const dur = row.querySelector('[data-time="dur"]');
+      if (dur) dur.textContent = fmtClock(v.dur_sec);
+      const toggleBtn = row.querySelector('[data-act="toggle"]');
+      if (toggleBtn) {
+        toggleBtn.title = v.paused ? 'Reprendre' : 'Pause';
+        toggleBtn.querySelector('svg').innerHTML = v.paused
+          ? '<polygon points="6 4 20 12 6 20 6 4"/>'
+          : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+      }
+      const speed = row.querySelector('[data-act="speed"]');
+      if (speed && document.activeElement !== speed) {
+        speed.value = String(v.speed);
+        speed.classList.toggle('off-1', v.speed !== 1.0);
+      }
+      // The expand button only lives on the compact row when there are
+      // multiple voices — if that count changed, re-render its slot.
+      const nameEl = row.querySelector('.player-name');
+      const hasExpandBtn = !!nameEl.querySelector('[data-act="expand"]');
+      const needExpandBtn = isCompact && state.voices.length > 1;
+      if (hasExpandBtn !== needExpandBtn) {
+        row.innerHTML = playerRowHtml(v, isCompact);
+        wirePlayerRow(row);
+        row.classList.toggle('compact', isCompact);
+        row.classList.toggle('paused', v.paused);
+      }
+    }
+
+    function pctOf(v) {
+      if (!v.dur_sec) return 0;
+      return Math.max(0, Math.min(100, (v.pos_sec / v.dur_sec) * 100));
+    }
+
+    function wirePlayerRow(row) {
+      row.addEventListener('click', async e => {
+        const t = e.target.closest('[data-act]');
+        if (!t) return;
+        const act = t.dataset.act;
+        const id = row.dataset.id;
+        if (act === 'expand') {
+          state.playerExpanded = !state.playerExpanded;
+          // Force a re-render now; next poll will refresh.
+          renderPlayer();
+          return;
+        }
+        if (act === 'toggle') {
+          const v = state.voices.find(x => x.id === id);
+          if (!v) return;
+          await fetch(`/voices/${id}/${v.paused ? 'resume' : 'pause'}`, {method: 'POST'});
+          v.paused = !v.paused;
+          renderPlayer();
+          return;
+        }
+        if (act === 'stop') {
+          await fetch(`/voices/${id}/stop`, {method: 'POST'});
+          state.voices = state.voices.filter(x => x.id !== id);
+          renderPlayer();
+          return;
+        }
+        if (act === 'seek') {
+          const v = state.voices.find(x => x.id === id);
+          if (!v || !v.dur_sec) return;
+          const bar = t;
+          const rect = bar.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const frac = Math.max(0, Math.min(1, x / rect.width));
+          const pos = frac * v.dur_sec;
+          await fetch(`/voices/${id}/seek`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({pos}),
+          });
+          v.pos_sec = pos;
+          renderPlayer();
+        }
+      });
+      row.addEventListener('change', async e => {
+        const t = e.target.closest('[data-act="speed"]');
+        if (!t) return;
+        const id = row.dataset.id;
+        const speed = parseFloat(t.value);
+        // Compute UX delay hint — time-stretching a 30s clip takes a bit.
+        const v = state.voices.find(x => x.id === id);
+        if (v) v.speed = speed;
+        t.classList.toggle('off-1', speed !== 1.0);
+        const r = await fetch(`/voices/${id}/speed`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({speed}),
+        });
+        const data = await r.json();
+        if (!data.ok) toast('Changement de vitesse échoué', true);
+      });
+    }
+
+    $('#player-pause-all').addEventListener('click', async () => {
+      await fetch('/voices/pause-all', {method: 'POST'});
+      state.voices.forEach(v => v.paused = true);
+      renderPlayer();
+    });
+    $('#player-resume-all').addEventListener('click', async () => {
+      await fetch('/voices/resume-all', {method: 'POST'});
+      state.voices.forEach(v => v.paused = false);
+      renderPlayer();
+    });
+    $('#player-stop-all').addEventListener('click', async () => {
+      $('#sb-stop-all').click();
     });
 
     $('#sb-open-folder').addEventListener('click', async () => {
@@ -1729,6 +2167,8 @@
       refreshLcd();
       // periodic refresh for new files added externally
       setInterval(refreshSounds, 4000);
+      // If something is already playing (e.g. window reopened), pick it up.
+      startPlayerPoll();
 
       try {
         const text = await navigator.clipboard.readText();
