@@ -804,6 +804,81 @@
     }
     .toast.error::before { background: var(--error); box-shadow: 0 0 6px var(--error); }
 
+    /* ─── Modal wide variant + effects panel ─── */
+    .modal.modal-wide { min-width: 560px; max-width: 640px; max-height: 86vh;
+                       display: flex; flex-direction: column; }
+    .modal-body { overflow-y: auto; padding-right: 4px; margin-right: -4px; }
+
+    .fx-panel {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--bg-2);
+    }
+    .fx-panel-head {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 6px 6px 0 0;
+    }
+    .fx-panel-title {
+      font-family: var(--f-mono); font-size: 0.72rem; font-weight: 700;
+      color: var(--text-2); letter-spacing: 0.12em;
+    }
+    .fx-panel-hint {
+      flex: 1; font-family: var(--f-mono); font-size: 0.65rem;
+      color: var(--muted); letter-spacing: 0.04em;
+    }
+    .btn.fx-reset { padding: 5px 10px; font-size: 0.66rem; }
+
+    .fx-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+      background: var(--line);
+    }
+    .fx-mod {
+      background: var(--bg-2);
+      padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .fx-mod-wide { grid-column: 1 / -1; }
+    .fx-mod-head {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      font-family: var(--f-mono); font-size: 0.66rem; font-weight: 600;
+      color: var(--text-2); text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .fx-mod-val {
+      font-family: var(--f-mono); font-size: 0.64rem; font-weight: 700;
+      color: var(--led-pink); letter-spacing: 0.04em;
+      padding: 1px 5px; background: rgba(255, 59, 133, 0.08);
+      border: 1px solid rgba(255, 59, 133, 0.2); border-radius: 2px;
+      min-width: 38px; text-align: center;
+    }
+    .fx-mod-val.off {
+      color: var(--muted); background: transparent;
+      border-color: var(--line);
+    }
+    .fx-mod .slider { width: 100%; }
+
+    .fx-sub-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 10px; }
+    .fx-sub { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .fx-sub-lbl {
+      font-family: var(--f-mono); font-size: 0.6rem; font-weight: 600;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
+    }
+
+    .fx-mini-toggle {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--f-mono); font-size: 0.6rem; font-weight: 600;
+      color: var(--muted); letter-spacing: 0.06em; cursor: pointer;
+      padding: 2px 6px; border: 1px solid var(--line); border-radius: 3px;
+    }
+    .fx-mini-toggle input { display: none; }
+    .fx-mini-toggle:has(input:checked) {
+      color: var(--led-pink); border-color: rgba(255, 59, 133, 0.4);
+      background: rgba(255, 59, 133, 0.08);
+    }
+
     /* ─── Mini-player (sticky bottom transport bar) ─── */
     .player {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
@@ -1250,25 +1325,103 @@
 
   <!-- ═══════════════ EDIT SOUND MODAL ═══════════════ -->
   <div class="modal-bg" id="edit-modal">
-    <div class="modal">
+    <div class="modal modal-wide">
       <h3 id="edit-title">Modifier le son</h3>
-      <div class="field">
-        <div class="group-label">Nom du fichier</div>
-        <input type="text" class="text-input" id="edit-name"/>
-      </div>
-      <div class="field">
-        <div class="group-label">Volume <span style="color: var(--muted);" id="edit-vol-val">100%</span></div>
-        <input type="range" min="0" max="200" value="100" class="slider" id="edit-vol"/>
-      </div>
-      <div class="field">
-        <div class="group-label">Raccourci clavier</div>
-        <div class="hotkey-input" id="edit-hotkey">
-          <span id="edit-hotkey-text">Clique pour définir…</span>
-          <button class="clear-hk" id="edit-hotkey-clear" style="display:none;">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
+      <div class="modal-body">
+        <div class="field">
+          <div class="group-label">Nom du fichier</div>
+          <input type="text" class="text-input" id="edit-name"/>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <div class="group-label">Volume <span style="color: var(--muted);" id="edit-vol-val">100%</span></div>
+            <input type="range" min="0" max="200" value="100" class="slider" id="edit-vol"/>
+          </div>
+          <div class="field">
+            <div class="group-label">Raccourci clavier</div>
+            <div class="hotkey-input" id="edit-hotkey">
+              <span id="edit-hotkey-text">Clique pour définir…</span>
+              <button class="clear-hk" id="edit-hotkey-clear" style="display:none;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Effects panel ─── -->
+        <div class="fx-panel">
+          <div class="fx-panel-head">
+            <span class="fx-panel-title">EFFETS</span>
+            <span class="fx-panel-hint" id="edit-fx-test-hint">Lance le son pour entendre</span>
+            <button class="btn fx-reset" id="edit-fx-reset" title="Tout désactiver">RESET</button>
+          </div>
+
+          <div class="fx-grid">
+            <div class="fx-mod">
+              <div class="fx-mod-head"><span>PITCH</span><span class="fx-mod-val" id="fx-pitch-val">0 st</span></div>
+              <input type="range" min="-24" max="24" step="1" value="0" class="slider" id="fx-pitch"/>
+            </div>
+
+            <div class="fx-mod">
+              <div class="fx-mod-head">
+                <span>FILTRE</span>
+                <label class="fx-mini-toggle"><input type="checkbox" id="fx-tel"/><span>TÉLÉPHONE</span></label>
+              </div>
+              <div class="fx-sub-row">
+                <div class="fx-sub">
+                  <span class="fx-sub-lbl">Aigus (LP)</span>
+                  <span class="fx-mod-val" id="fx-lp-val">off</span>
+                  <input type="range" min="0" max="100" step="1" value="0" class="slider" id="fx-lp"/>
+                </div>
+                <div class="fx-sub">
+                  <span class="fx-sub-lbl">Graves (HP)</span>
+                  <span class="fx-mod-val" id="fx-hp-val">off</span>
+                  <input type="range" min="0" max="100" step="1" value="0" class="slider" id="fx-hp"/>
+                </div>
+              </div>
+            </div>
+
+            <div class="fx-mod">
+              <div class="fx-mod-head"><span>ROBOT</span><span class="fx-mod-val" id="fx-robot-val">off</span></div>
+              <input type="range" min="0" max="200" step="1" value="0" class="slider" id="fx-robot"/>
+            </div>
+
+            <div class="fx-mod">
+              <div class="fx-mod-head"><span>TREMOLO</span><span class="fx-mod-val" id="fx-trem-val">off</span></div>
+              <input type="range" min="0" max="100" step="1" value="0" class="slider" id="fx-trem"/>
+            </div>
+
+            <div class="fx-mod">
+              <div class="fx-mod-head"><span>DISTO</span><span class="fx-mod-val" id="fx-dist-val">off</span></div>
+              <input type="range" min="0" max="100" step="1" value="0" class="slider" id="fx-dist"/>
+            </div>
+
+            <div class="fx-mod">
+              <div class="fx-mod-head"><span>REVERB</span><span class="fx-mod-val" id="fx-rev-val">off</span></div>
+              <input type="range" min="0" max="100" step="1" value="0" class="slider" id="fx-rev"/>
+            </div>
+
+            <div class="fx-mod fx-mod-wide">
+              <div class="fx-mod-head"><span>ECHO</span><span class="fx-mod-val" id="fx-echo-val">off</span></div>
+              <div class="fx-sub-row">
+                <div class="fx-sub">
+                  <span class="fx-sub-lbl">Délai</span>
+                  <input type="range" min="0" max="100" step="1" value="0" class="slider" id="fx-echo-ms"/>
+                </div>
+                <div class="fx-sub">
+                  <span class="fx-sub-lbl">Feedback</span>
+                  <input type="range" min="0" max="100" step="1" value="35" class="slider" id="fx-echo-fb"/>
+                </div>
+                <div class="fx-sub">
+                  <span class="fx-sub-lbl">Mix</span>
+                  <input type="range" min="0" max="100" step="1" value="35" class="slider" id="fx-echo-mix"/>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
       <div class="modal-actions">
         <button class="btn danger" id="edit-delete">Supprimer</button>
         <button class="btn" id="edit-cancel">Annuler</button>
@@ -1923,6 +2076,133 @@
     $('#sb-go-convert').addEventListener('click', () => switchTab('convert'));
 
     // ─── Edit modal ──────────────────────────────────────────────────────────
+    // Slider value (0..N) → effect parameter and human-readable label.
+    // Returning `null` means the effect is off (the slider sits at 0).
+    const FX_MAP = {
+      pitch: { range: [-24, 24], to: v => v === 0 ? null : v,
+               label: v => v === 0 ? 'off' : (v > 0 ? `+${v} st` : `${v} st`) },
+      lp:    { range: [0, 100], to: v => v === 0 ? null : Math.round(20000 * Math.pow(0.02, v / 100)),
+               label: v => v === 0 ? 'off' : `${Math.round(20000 * Math.pow(0.02, v / 100))} Hz` },
+      hp:    { range: [0, 100], to: v => v === 0 ? null : Math.round(20 * Math.pow(150, v / 100)),
+               label: v => v === 0 ? 'off' : `${Math.round(20 * Math.pow(150, v / 100))} Hz` },
+      robot: { range: [0, 200], to: v => v === 0 ? null : v,
+               label: v => v === 0 ? 'off' : `${v} Hz` },
+      trem:  { range: [0, 100], to: v => v === 0 ? null : v / 100,
+               label: v => v === 0 ? 'off' : `${v}%` },
+      dist:  { range: [0, 100], to: v => v === 0 ? null : v / 100,
+               label: v => v === 0 ? 'off' : `${v}%` },
+      rev:   { range: [0, 100], to: v => v === 0 ? null : v / 100,
+               label: v => v === 0 ? 'off' : `${v}%` },
+      echoMs:{ range: [0, 100], to: v => v === 0 ? null : Math.round(20 + v * 19.8),  // 20–2000ms
+               label: v => v === 0 ? 'off' : `${Math.round(20 + v * 19.8)}ms` },
+    };
+
+    function fxValueToSlider(key, value) {
+      // Reverse the slider mapping so we can rehydrate the modal from saved config.
+      if (value == null) return 0;
+      switch (key) {
+        case 'pitch': return Math.round(value);
+        case 'lp':    return Math.round(100 * Math.log(value / 20000) / Math.log(0.02));
+        case 'hp':    return Math.round(100 * Math.log(value / 20) / Math.log(150));
+        case 'robot': return Math.round(value);
+        case 'trem':  return Math.round(value * 100);
+        case 'dist':  return Math.round(value * 100);
+        case 'rev':   return Math.round(value * 100);
+        case 'echoMs':return Math.round((value - 20) / 19.8);
+      }
+      return 0;
+    }
+
+    function readFxFromModal() {
+      const fx = {};
+      const pitch  = parseInt($('#fx-pitch').value, 10);
+      const lp     = parseInt($('#fx-lp').value, 10);
+      const hp     = parseInt($('#fx-hp').value, 10);
+      const robot  = parseInt($('#fx-robot').value, 10);
+      const trem   = parseInt($('#fx-trem').value, 10);
+      const dist   = parseInt($('#fx-dist').value, 10);
+      const rev    = parseInt($('#fx-rev').value, 10);
+      const echoMs = parseInt($('#fx-echo-ms').value, 10);
+      const echoFb = parseInt($('#fx-echo-fb').value, 10);
+      const echoMix= parseInt($('#fx-echo-mix').value, 10);
+
+      if (pitch !== 0) fx.pitch_semitones = pitch;
+      if ($('#fx-tel').checked) fx.telephone = true;
+      const lpHz = FX_MAP.lp.to(lp);    if (lpHz != null) fx.lowpass_hz = lpHz;
+      const hpHz = FX_MAP.hp.to(hp);    if (hpHz != null) fx.highpass_hz = hpHz;
+      if (robot > 0) fx.robot_hz = robot;
+      if (trem  > 0) { fx.tremolo_hz = 6; fx.tremolo_depth = trem / 100; }
+      if (dist  > 0) fx.distortion = dist / 100;
+      if (rev   > 0) fx.reverb = rev / 100;
+      if (echoMs > 0) {
+        fx.echo_ms = FX_MAP.echoMs.to(echoMs);
+        fx.echo_feedback = echoFb / 100;
+        fx.echo_mix = echoMix / 100;
+      }
+      return fx;
+    }
+
+    function writeFxToModal(fx) {
+      fx = fx || {};
+      $('#fx-pitch').value = fxValueToSlider('pitch', fx.pitch_semitones);
+      $('#fx-tel').checked = !!fx.telephone;
+      $('#fx-lp').value    = fxValueToSlider('lp', fx.lowpass_hz);
+      $('#fx-hp').value    = fxValueToSlider('hp', fx.highpass_hz);
+      $('#fx-robot').value = fxValueToSlider('robot', fx.robot_hz);
+      $('#fx-trem').value  = fx.tremolo_depth ? Math.round(fx.tremolo_depth * 100) : 0;
+      $('#fx-dist').value  = fxValueToSlider('dist', fx.distortion);
+      $('#fx-rev').value   = fxValueToSlider('rev', fx.reverb);
+      $('#fx-echo-ms').value  = fxValueToSlider('echoMs', fx.echo_ms);
+      $('#fx-echo-fb').value  = fx.echo_feedback != null ? Math.round(fx.echo_feedback * 100) : 35;
+      $('#fx-echo-mix').value = fx.echo_mix      != null ? Math.round(fx.echo_mix * 100)      : 35;
+      refreshFxLabels();
+    }
+
+    function refreshFxLabels() {
+      const setVal = (id, key, sliderVal) => {
+        const el = $(id);
+        const label = FX_MAP[key].label(sliderVal);
+        el.textContent = label;
+        el.classList.toggle('off', sliderVal === 0);
+      };
+      setVal('#fx-pitch-val', 'pitch', parseInt($('#fx-pitch').value, 10));
+      setVal('#fx-lp-val',    'lp',    parseInt($('#fx-lp').value, 10));
+      setVal('#fx-hp-val',    'hp',    parseInt($('#fx-hp').value, 10));
+      setVal('#fx-robot-val', 'robot', parseInt($('#fx-robot').value, 10));
+      setVal('#fx-trem-val',  'trem',  parseInt($('#fx-trem').value, 10));
+      setVal('#fx-dist-val',  'dist',  parseInt($('#fx-dist').value, 10));
+      setVal('#fx-rev-val',   'rev',   parseInt($('#fx-rev').value, 10));
+      setVal('#fx-echo-val',  'echoMs',parseInt($('#fx-echo-ms').value, 10));
+    }
+
+    // Auto-save FX on slider input so the user just plays the sound to hear.
+    let fxSaveTimer = null;
+    function scheduleFxSave() {
+      refreshFxLabels();
+      if (!state.editingSound) return;
+      clearTimeout(fxSaveTimer);
+      fxSaveTimer = setTimeout(async () => {
+        if (!state.editingSound) return;
+        const fx = readFxFromModal();
+        try {
+          await fetch(`/sounds/${encodeURIComponent(state.editingSound)}/config`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({effects: fx}),
+          });
+        } catch {}
+      }, 220);
+    }
+
+    document.querySelectorAll(
+      '#fx-pitch, #fx-lp, #fx-hp, #fx-robot, #fx-trem, #fx-dist, #fx-rev, ' +
+      '#fx-echo-ms, #fx-echo-fb, #fx-echo-mix, #fx-tel'
+    ).forEach(el => el.addEventListener('input', scheduleFxSave));
+
+    $('#edit-fx-reset').addEventListener('click', () => {
+      writeFxToModal({});
+      scheduleFxSave();
+    });
+
     function openEditModal(filename) {
       const sound = state.sounds.find(s => s.filename === filename);
       if (!sound) return;
@@ -1934,6 +2214,7 @@
       $('#edit-vol').value = vol;
       $('#edit-vol-val').textContent = `${vol}%`;
       setHotkeyDisplay(cfg.hotkey || '');
+      writeFxToModal(cfg.effects || {});
       $('#edit-modal').classList.add('show');
     }
 
@@ -1957,6 +2238,7 @@
       const newName = $('#edit-name').value.trim();
       const vol = parseInt($('#edit-vol').value, 10) / 100;
       const hk = $('#edit-hotkey').dataset.combo || '';
+      const fx = readFxFromModal();
 
       let finalName = original;
       if (newName && newName !== original) {
@@ -1970,7 +2252,7 @@
       }
       await fetch(`/sounds/${encodeURIComponent(finalName)}/config`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({volume: vol, hotkey: hk}),
+        body: JSON.stringify({volume: vol, hotkey: hk, effects: fx}),
       });
       closeEditModal();
       refreshSounds();

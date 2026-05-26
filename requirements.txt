@@ -5,6 +5,7 @@ mutagen
 sounddevice
 soundfile
 numpy
+scipy
 audiotsm
 pynput
 pystray

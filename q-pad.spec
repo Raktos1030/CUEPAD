@@ -6,6 +6,7 @@ wv_datas,    wv_bins,    wv_hidden    = collect_all("webview")
 ytdlp_datas, ytdlp_bins, ytdlp_hidden = collect_all("yt_dlp")
 mut_datas,   mut_bins,   mut_hidden   = collect_all("mutagen")
 sd_datas,    sd_bins,    sd_hidden    = collect_all("sounddevice")
+sci_datas,   sci_bins,   sci_hidden   = collect_all("scipy")
 ats_datas,   ats_bins,   ats_hidden   = collect_all("audiotsm")
 pn_datas,    pn_bins,    pn_hidden    = collect_all("pynput")
 pst_datas,   pst_bins,   pst_hidden   = collect_all("pystray")
@@ -22,6 +23,7 @@ a = Analysis(
         *ytdlp_bins,
         *mut_bins,
         *sd_bins,
+        *sci_bins,
         *ats_bins,
         *pn_bins,
         *pst_bins,
@@ -34,6 +36,7 @@ a = Analysis(
         *ytdlp_datas,
         *mut_datas,
         *sd_datas,
+        *sci_datas,
         *ats_datas,
         *pn_datas,
         *pst_datas,
@@ -52,9 +55,12 @@ a = Analysis(
         "sounddevice",
         "soundfile",
         "numpy",
+        "scipy",
+        "scipy.signal",
         "audiotsm",
         "audiotsm.wsola",
         "audiotsm.io.array",
+        "effects",
         "pynput",
         "pynput.keyboard",
         "pynput.keyboard._win32",
@@ -66,6 +72,7 @@ a = Analysis(
         *ytdlp_hidden,
         *mut_hidden,
         *sd_hidden,
+        *sci_hidden,
         *ats_hidden,
         *pn_hidden,
         *pst_hidden,

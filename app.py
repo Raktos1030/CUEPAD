@@ -137,7 +137,9 @@ def sound_play():
         return jsonify({"error": "Fichier introuvable"}), 404
 
     sett = services["settings"]
-    per_vol = float(sett.sound(filename).get("volume", 1.0))
+    cfg = sett.sound(filename)
+    per_vol = float(cfg.get("volume", 1.0))
+    effects = cfg.get("effects") or None
 
     ok, err, pb_id = services["audio"].play(
         str(path),
@@ -146,6 +148,7 @@ def sound_play():
         per_sound_gain=per_vol,
         monitor_enabled=bool(sett.get("monitor_enabled", True)),
         name=Path(filename).stem,
+        effects=effects,
     )
     return jsonify({"ok": ok, "error": err, "id": pb_id})
 
@@ -251,6 +254,44 @@ def sound_rename(filename: str):
     return jsonify({"ok": True, "filename": result})
 
 
+_FX_NUMERIC = {
+    "pitch_semitones":  (-24.0, 24.0),
+    "lowpass_hz":       (40.0,  20000.0),
+    "highpass_hz":      (20.0,  10000.0),
+    "robot_hz":         (1.0,   2000.0),
+    "tremolo_hz":       (0.1,   30.0),
+    "tremolo_depth":    (0.0,   1.0),
+    "distortion":       (0.0,   1.0),
+    "echo_ms":          (10.0,  2000.0),
+    "echo_feedback":    (0.0,   0.95),
+    "echo_mix":         (0.0,   1.0),
+    "reverb":           (0.0,   1.0),
+}
+
+
+def _clean_effects(fx) -> dict | None:
+    if not isinstance(fx, dict):
+        return None
+    out: dict = {}
+    for k, (lo, hi) in _FX_NUMERIC.items():
+        if k not in fx:
+            continue
+        try:
+            v = float(fx[k])
+        except (TypeError, ValueError):
+            continue
+        v = max(lo, min(hi, v))
+        # Drop keys that are functionally off so we don't waste CPU on no-ops.
+        if k == "pitch_semitones" and abs(v) < 0.05:
+            continue
+        if k in ("distortion", "reverb", "tremolo_depth", "echo_mix") and v < 0.01:
+            continue
+        out[k] = v
+    if fx.get("telephone"):
+        out["telephone"] = True
+    return out or None
+
+
 @app.route("/sounds/<path:filename>/config", methods=["POST"])
 def sound_config(filename: str):
     data = request.get_json(silent=True) or {}
@@ -264,6 +305,8 @@ def sound_config(filename: str):
         patch["hotkey"] = (data["hotkey"] or "").strip()
     if "color" in data:
         patch["color"] = (data["color"] or "").strip()
+    if "effects" in data:
+        patch["effects"] = _clean_effects(data["effects"])
     services["settings"].set_sound(filename, patch)
     if "hotkey" in patch:
         _rebind_hotkeys()
@@ -365,7 +408,8 @@ def _play_callback(filename: str):
         path = lib.get_path(filename)
         if not path:
             return
-        per_vol = float(sett.sound(filename).get("volume", 1.0))
+        cfg = sett.sound(filename)
+        per_vol = float(cfg.get("volume", 1.0))
         audio.play(
             str(path),
             device_main=sett.get("output_main"),
@@ -373,6 +417,7 @@ def _play_callback(filename: str):
             per_sound_gain=per_vol,
             monitor_enabled=bool(sett.get("monitor_enabled", True)),
             name=Path(filename).stem,
+            effects=cfg.get("effects") or None,
         )  # tuple result ignored — hotkeys are fire-and-forget
     return cb
 

@@ -162,6 +162,7 @@ class AudioEngine:
         per_sound_gain: float,
         monitor_enabled: bool,
         name: str | None = None,
+        effects: dict | None = None,
     ) -> tuple[bool, str | None, str | None]:
         try:
             data, sr, channels = self._decode(file_path)
@@ -174,6 +175,22 @@ class AudioEngine:
             channels = 1
         if data.dtype != np.float32:
             data = data.astype(np.float32)
+
+        # Apply the configured effects chain to the decoded buffer *before*
+        # we hand it off to the streams. Cheap on a modern CPU even for long
+        # clips — and means each play picks up whatever's in settings.json
+        # right now (no caching of pre-processed data).
+        if effects:
+            try:
+                from effects import apply_chain
+                data = apply_chain(data, sr, effects)
+                if data.ndim == 1:
+                    data = data.reshape(-1, 1)
+                if data.dtype != np.float32:
+                    data = data.astype(np.float32)
+                channels = data.shape[1]
+            except Exception:
+                pass  # never break playback because an effect failed
 
         pb_id = uuid.uuid4().hex[:12]
         pb = Playback(pb_id, name or Path(file_path).stem,
