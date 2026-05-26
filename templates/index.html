@@ -879,6 +879,93 @@
       background: rgba(255, 59, 133, 0.08);
     }
 
+    /* ─── Effects tab ─── */
+    .fx-tab-switch {
+      display: inline-flex; gap: 2px; padding: 3px;
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: 5px; margin-bottom: 18px;
+    }
+    .fx-subtab {
+      background: transparent; border: none;
+      color: var(--muted);
+      padding: 8px 18px; border-radius: 3px;
+      font-family: var(--f-mono); font-size: 0.74rem; font-weight: 700;
+      letter-spacing: 0.1em; cursor: pointer;
+      transition: background 0.1s, color 0.1s;
+    }
+    .fx-subtab:hover { color: var(--text-2); }
+    .fx-subtab.active {
+      background: var(--surface-3); color: var(--text);
+      box-shadow: 0 0 0 1px var(--line-strong) inset;
+    }
+
+    .fx-live-status {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: 5px; padding: 9px 11px;
+      min-height: 38px;
+    }
+    .fx-live-state {
+      font-family: var(--f-mono); font-size: 0.74rem; font-weight: 700;
+      letter-spacing: 0.08em; color: var(--muted);
+    }
+    .fx-live-state.running {
+      color: var(--led-lime);
+      text-shadow: 0 0 6px rgba(168, 255, 82, 0.4);
+    }
+    .fx-live-state.error { color: var(--error); }
+    .fx-live-stat {
+      margin-left: auto;
+      font-family: var(--f-mono); font-size: 0.7rem;
+      color: var(--text-2); font-variant-numeric: tabular-nums;
+    }
+
+    /* File drop zone */
+    .fx-drop {
+      border: 1px dashed var(--line-strong);
+      border-radius: 6px;
+      padding: 28px 20px;
+      text-align: center; cursor: pointer;
+      background: var(--bg-2);
+      transition: border-color 0.15s, background 0.15s;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .fx-drop:hover, .fx-drop.dragover {
+      border-color: var(--led-pink);
+      background: rgba(255, 59, 133, 0.04);
+    }
+    .fx-drop-text {
+      font-family: var(--f-display); font-weight: 600; color: var(--text);
+    }
+    .fx-drop-sub {
+      font-family: var(--f-mono); font-size: 0.7rem; color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .fx-drop.loaded {
+      border-style: solid; border-color: var(--led-lime);
+      background: rgba(168, 255, 82, 0.06);
+    }
+    .fx-drop.loaded .fx-drop-text { color: var(--led-lime); }
+
+    .fx-file-status {
+      margin-top: 14px; padding: 10px 12px;
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-left: 3px solid var(--led-pink);
+      border-radius: 4px;
+      font-family: var(--f-mono); font-size: 0.78rem;
+    }
+    .fx-file-status.ok    { border-left-color: var(--led-lime); color: var(--led-lime); }
+    .fx-file-status.error { border-left-color: var(--error);    color: var(--error); }
+
+    /* Collapsible effects panel (used in edit modal) */
+    .fx-panel.collapsible .fx-panel-head { cursor: pointer; user-select: none; }
+    .fx-panel.collapsible .fx-panel-toggle {
+      width: 16px; height: 16px; display: inline-grid; place-items: center;
+      transition: transform 0.18s;
+    }
+    .fx-panel.collapsible:not(.open) .fx-grid { display: none; }
+    .fx-panel.collapsible.open .fx-panel-toggle { transform: rotate(90deg); }
+
     /* ─── Mini-player (sticky bottom transport bar) ─── */
     .player {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
@@ -1061,6 +1148,10 @@
       <button class="tab" data-tab="convert">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Convert
+      </button>
+      <button class="tab" data-tab="effects">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2l3-9 4 18 3-12 2 6h4"/></svg>
+        Effets
       </button>
       <button class="tab" data-tab="settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1257,6 +1348,95 @@
       </div>
     </div>
 
+    <!-- ═══════════════ EFFECTS PANE ═══════════════ -->
+    <div class="pane" id="pane-effects">
+      <div class="fx-tab-switch">
+        <button class="fx-subtab active" data-subtab="live">LIVE MIC</button>
+        <button class="fx-subtab" data-subtab="file">FICHIER</button>
+      </div>
+
+      <!-- ── LIVE MIC ─────────────────────────────────────────────────── -->
+      <div class="fx-subpane active" id="fx-subpane-live">
+        <div class="card">
+          <h2 class="section-title">I/O</h2>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Microphone</div>
+              <select class="select" id="fx-live-input"></select>
+            </div>
+            <div class="field">
+              <div class="group-label">Sortie</div>
+              <select class="select" id="fx-live-output"></select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Latence</div>
+              <div class="seg" id="fx-live-latency-seg">
+                <button class="seg-btn active" data-value="low">BASSE ~5 MS</button>
+                <button class="seg-btn" data-value="medium">MOY ~11 MS</button>
+                <button class="seg-btn" data-value="high">HAUTE ~21 MS</button>
+                <button class="seg-btn" data-value="safe">SAFE ~43 MS</button>
+              </div>
+            </div>
+            <div class="field">
+              <div class="group-label">État</div>
+              <div class="fx-live-status" id="fx-live-status">
+                <span class="fx-live-state" id="fx-live-state">ARRÊTÉ</span>
+                <span class="fx-live-stat" id="fx-live-stat">—</span>
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 14px;">
+            <button class="btn primary" id="fx-live-start">
+              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+              DÉMARRER
+            </button>
+            <button class="btn danger" id="fx-live-stop" style="display: none;">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              ARRÊTER
+            </button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 18px;">
+          <h2 class="section-title">EFFETS — appliqués en temps réel</h2>
+          <div class="fx-panel-hint" style="margin-bottom: 10px;">Le pitch est désactivé en live (offline uniquement pour l'instant)</div>
+          <div id="fx-live-controls"></div>
+        </div>
+      </div>
+
+      <!-- ── FICHIER ──────────────────────────────────────────────────── -->
+      <div class="fx-subpane" id="fx-subpane-file" style="display: none;">
+        <div class="card">
+          <h2 class="section-title">Source</h2>
+          <div class="fx-drop" id="fx-file-drop">
+            <input type="file" id="fx-file-input" accept=".mp3,.wav,.flac,.ogg,.opus,.m4a,.aac,.webm" style="display: none;"/>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 36px; height: 36px; color: var(--muted);"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div class="fx-drop-text" id="fx-drop-text">Glisse un fichier audio ici, ou clique pour parcourir</div>
+            <div class="fx-drop-sub">mp3, wav, flac, ogg, opus, m4a, aac, webm</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 18px;">
+          <h2 class="section-title">Effets</h2>
+          <div id="fx-file-controls"></div>
+        </div>
+
+        <div class="card" style="margin-top: 18px;">
+          <div class="field">
+            <div class="group-label">Nom du fichier de sortie (optionnel)</div>
+            <input type="text" class="text-input" id="fx-file-outname" placeholder="Auto (nom-source-fx)"/>
+          </div>
+          <button class="btn primary" id="fx-file-process" style="width: 100%; margin-top: 8px;" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            APPLIQUER ET AJOUTER À LA SOUNDBOARD
+          </button>
+          <div class="fx-file-status" id="fx-file-status" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══════════════ SETTINGS PANE ═══════════════ -->
     <div class="pane" id="pane-settings">
       <div class="card" style="max-width: 760px; margin: 0 auto;">
@@ -1348,9 +1528,12 @@
           </div>
         </div>
 
-        <!-- ─── Effects panel ─── -->
-        <div class="fx-panel">
-          <div class="fx-panel-head">
+        <!-- ─── Effects panel (collapsed by default) ─── -->
+        <div class="fx-panel collapsible" id="edit-fx-panel">
+          <div class="fx-panel-head" id="edit-fx-toggle">
+            <span class="fx-panel-toggle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+            </span>
             <span class="fx-panel-title">EFFETS</span>
             <span class="fx-panel-hint" id="edit-fx-test-hint">Lance le son pour entendre</span>
             <button class="btn fx-reset" id="edit-fx-reset" title="Tout désactiver">RESET</button>
@@ -1531,6 +1714,7 @@
       saveSetting('active_tab', name);
       if (name === 'soundboard') refreshSounds();
       if (name === 'convert') refreshHistory();
+      if (name === 'effects') onEnterEffectsTab();
     }
     $('#tabs').addEventListener('click', e => {
       const tab = e.target.closest('.tab');
@@ -2198,9 +2382,16 @@
       '#fx-echo-ms, #fx-echo-fb, #fx-echo-mix, #fx-tel'
     ).forEach(el => el.addEventListener('input', scheduleFxSave));
 
-    $('#edit-fx-reset').addEventListener('click', () => {
+    $('#edit-fx-reset').addEventListener('click', (e) => {
+      e.stopPropagation();  // don't toggle the collapse
       writeFxToModal({});
       scheduleFxSave();
+    });
+
+    // Modal effects panel — collapsed by default, click header to expand.
+    $('#edit-fx-toggle').addEventListener('click', (e) => {
+      if (e.target.closest('.fx-reset')) return;
+      $('#edit-fx-panel').classList.toggle('open');
     });
 
     function openEditModal(filename) {
@@ -2505,6 +2696,319 @@
     // ─── Window controls ─────────────────────────────────────────────────────
     $('#minimize-btn').addEventListener('click', async () => {
       try { await window.pywebview.api.hide(); } catch {}
+    });
+
+    // ─── Effects tab (live + file) ───────────────────────────────────────────
+    // Reusable: builds the same effects grid as the modal, but with a custom
+    // ID prefix so live and file panes can coexist with independent state.
+    function buildFxGridHTML(prefix, includePitch) {
+      const pitchRow = includePitch ? `
+        <div class="fx-mod">
+          <div class="fx-mod-head"><span>PITCH</span><span class="fx-mod-val" id="${prefix}-pitch-val">0 st</span></div>
+          <input type="range" min="-24" max="24" step="1" value="0" class="slider" data-fx="pitch" id="${prefix}-pitch"/>
+        </div>
+        ` : '';
+      return `
+        ${pitchRow}
+        <div class="fx-mod">
+          <div class="fx-mod-head">
+            <span>FILTRE</span>
+            <label class="fx-mini-toggle"><input type="checkbox" data-fx="tel" id="${prefix}-tel"/><span>TÉLÉPHONE</span></label>
+          </div>
+          <div class="fx-sub-row">
+            <div class="fx-sub">
+              <span class="fx-sub-lbl">Aigus (LP)</span>
+              <span class="fx-mod-val" id="${prefix}-lp-val">off</span>
+              <input type="range" min="0" max="100" step="1" value="0" class="slider" data-fx="lp" id="${prefix}-lp"/>
+            </div>
+            <div class="fx-sub">
+              <span class="fx-sub-lbl">Graves (HP)</span>
+              <span class="fx-mod-val" id="${prefix}-hp-val">off</span>
+              <input type="range" min="0" max="100" step="1" value="0" class="slider" data-fx="hp" id="${prefix}-hp"/>
+            </div>
+          </div>
+        </div>
+        <div class="fx-mod">
+          <div class="fx-mod-head"><span>ROBOT</span><span class="fx-mod-val" id="${prefix}-robot-val">off</span></div>
+          <input type="range" min="0" max="200" step="1" value="0" class="slider" data-fx="robot" id="${prefix}-robot"/>
+        </div>
+        <div class="fx-mod">
+          <div class="fx-mod-head"><span>TREMOLO</span><span class="fx-mod-val" id="${prefix}-trem-val">off</span></div>
+          <input type="range" min="0" max="100" step="1" value="0" class="slider" data-fx="trem" id="${prefix}-trem"/>
+        </div>
+        <div class="fx-mod">
+          <div class="fx-mod-head"><span>DISTO</span><span class="fx-mod-val" id="${prefix}-dist-val">off</span></div>
+          <input type="range" min="0" max="100" step="1" value="0" class="slider" data-fx="dist" id="${prefix}-dist"/>
+        </div>
+        <div class="fx-mod">
+          <div class="fx-mod-head"><span>REVERB</span><span class="fx-mod-val" id="${prefix}-rev-val">off</span></div>
+          <input type="range" min="0" max="100" step="1" value="0" class="slider" data-fx="rev" id="${prefix}-rev"/>
+        </div>
+        <div class="fx-mod fx-mod-wide">
+          <div class="fx-mod-head"><span>ECHO</span><span class="fx-mod-val" id="${prefix}-echo-val">off</span></div>
+          <div class="fx-sub-row">
+            <div class="fx-sub">
+              <span class="fx-sub-lbl">Délai</span>
+              <input type="range" min="0" max="100" step="1" value="0" class="slider" data-fx="echo-ms" id="${prefix}-echo-ms"/>
+            </div>
+            <div class="fx-sub">
+              <span class="fx-sub-lbl">Feedback</span>
+              <input type="range" min="0" max="100" step="1" value="35" class="slider" data-fx="echo-fb" id="${prefix}-echo-fb"/>
+            </div>
+            <div class="fx-sub">
+              <span class="fx-sub-lbl">Mix</span>
+              <input type="range" min="0" max="100" step="1" value="35" class="slider" data-fx="echo-mix" id="${prefix}-echo-mix"/>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function readFxFromPrefix(prefix, includePitch) {
+      const v = id => parseInt($(`#${prefix}-${id}`).value, 10);
+      const fx = {};
+      if (includePitch) {
+        const pitch = v('pitch');
+        if (pitch !== 0) fx.pitch_semitones = pitch;
+      }
+      if ($(`#${prefix}-tel`).checked) fx.telephone = true;
+      const lpHz = FX_MAP.lp.to(v('lp'));    if (lpHz != null) fx.lowpass_hz  = lpHz;
+      const hpHz = FX_MAP.hp.to(v('hp'));    if (hpHz != null) fx.highpass_hz = hpHz;
+      if (v('robot') > 0) fx.robot_hz = v('robot');
+      if (v('trem')  > 0) { fx.tremolo_hz = 6; fx.tremolo_depth = v('trem') / 100; }
+      if (v('dist')  > 0) fx.distortion = v('dist') / 100;
+      if (v('rev')   > 0) fx.reverb     = v('rev') / 100;
+      if (v('echo-ms') > 0) {
+        fx.echo_ms       = FX_MAP.echoMs.to(v('echo-ms'));
+        fx.echo_feedback = v('echo-fb') / 100;
+        fx.echo_mix      = v('echo-mix') / 100;
+      }
+      return fx;
+    }
+
+    function refreshFxLabelsFor(prefix, includePitch) {
+      const setVal = (id, key, sliderVal) => {
+        const el = $(`#${prefix}-${id}-val`);
+        if (!el) return;
+        el.textContent = FX_MAP[key].label(sliderVal);
+        el.classList.toggle('off', sliderVal === 0);
+      };
+      const v = id => parseInt($(`#${prefix}-${id}`).value, 10);
+      if (includePitch) setVal('pitch', 'pitch', v('pitch'));
+      setVal('lp', 'lp', v('lp'));
+      setVal('hp', 'hp', v('hp'));
+      setVal('robot', 'robot', v('robot'));
+      setVal('trem', 'trem', v('trem'));
+      setVal('dist', 'dist', v('dist'));
+      setVal('rev', 'rev', v('rev'));
+      setVal('echo', 'echoMs', v('echo-ms'));
+    }
+
+    function wireFxGrid(prefix, includePitch, onChange) {
+      const ids = ['lp','hp','robot','trem','dist','rev','echo-ms','echo-fb','echo-mix','tel'];
+      if (includePitch) ids.push('pitch');
+      ids.forEach(id => {
+        const el = $(`#${prefix}-${id}`);
+        if (el) el.addEventListener('input', () => {
+          refreshFxLabelsFor(prefix, includePitch);
+          onChange();
+        });
+      });
+    }
+
+    // ─── Live mic engine ─────────────────────────────────────────────────────
+    const liveState = { latency: 'low', running: false, statusTimer: null };
+
+    async function refreshLiveDevices() {
+      try {
+        const r = await fetch('/devices');
+        const d = await r.json();
+        const inputs  = d.inputs  || [];
+        const outputs = d.outputs || [];
+        const fill = (el, list, hint) => {
+          if (!el) return;
+          el.innerHTML = list.map(x => {
+            const tag = x.virtual ? ' [VIRTUEL]' : (x.default ? ' [DÉFAUT]' : '');
+            return `<option value="${x.id}">${escapeHtml(x.name)}${tag}</option>`;
+          }).join('') || `<option value="">${hint}</option>`;
+        };
+        fill($('#fx-live-input'),  inputs,  'Aucun micro détecté');
+        fill($('#fx-live-output'), outputs, 'Aucune sortie détectée');
+      } catch {}
+    }
+
+    function onEnterEffectsTab() {
+      // Build the grids the first time we land here.
+      if (!$('#fx-live-controls').children.length) {
+        $('#fx-live-controls').innerHTML  = `<div class="fx-grid">${buildFxGridHTML('live-fx', false)}</div>`;
+        $('#fx-file-controls').innerHTML  = `<div class="fx-grid">${buildFxGridHTML('file-fx', true)}</div>`;
+        wireFxGrid('live-fx', false, scheduleLiveSave);
+        wireFxGrid('file-fx', true,  () => refreshFxLabelsFor('file-fx', true));
+        refreshFxLabelsFor('live-fx', false);
+        refreshFxLabelsFor('file-fx', true);
+      }
+      refreshLiveDevices();
+      refreshLiveStatus();
+    }
+
+    let liveSaveTimer = null;
+    function scheduleLiveSave() {
+      clearTimeout(liveSaveTimer);
+      liveSaveTimer = setTimeout(async () => {
+        try {
+          await fetch('/effects/live/config', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({config: readFxFromPrefix('live-fx', false)}),
+          });
+        } catch {}
+      }, 80);  // tight so live changes feel immediate
+    }
+
+    async function refreshLiveStatus() {
+      try {
+        const r = await fetch('/effects/live/status');
+        const s = await r.json();
+        liveState.running = !!s.running;
+        const stateEl = $('#fx-live-state');
+        const statEl  = $('#fx-live-stat');
+        stateEl.classList.remove('running','error');
+        if (s.error) {
+          stateEl.textContent = 'ERREUR';
+          stateEl.classList.add('error');
+          statEl.textContent = s.error;
+        } else if (s.running) {
+          stateEl.textContent = `EN MARCHE  ${s.latency_ms} MS`;
+          stateEl.classList.add('running');
+          statEl.textContent = `UP ${s.uptime_sec}S · ${s.underruns} XRUN${s.underruns === 1 ? '' : 'S'}`;
+        } else {
+          stateEl.textContent = 'ARRÊTÉ';
+          statEl.textContent  = '—';
+        }
+        $('#fx-live-start').style.display = s.running ? 'none' : 'inline-flex';
+        $('#fx-live-stop').style.display  = s.running ? 'inline-flex' : 'none';
+      } catch {}
+    }
+
+    // Latency segmented control
+    $('#fx-live-latency-seg').addEventListener('click', e => {
+      const btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      $$('#fx-live-latency-seg .seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+      liveState.latency = btn.dataset.value;
+      // If running, restart with new latency.
+      if (liveState.running) restartLive();
+    });
+
+    async function startLive() {
+      const input = $('#fx-live-input').value;
+      const output = $('#fx-live-output').value;
+      if (!input || !output) {
+        toast('Sélectionne un micro et une sortie', true);
+        return;
+      }
+      const cfg = readFxFromPrefix('live-fx', false);
+      try {
+        const r = await fetch('/effects/live/start', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({input, output, latency: liveState.latency, config: cfg}),
+        });
+        const d = await r.json();
+        if (!d.ok) toast(d.error || 'Démarrage échoué', true);
+        refreshLiveStatus();
+      } catch (err) {
+        toast('Erreur réseau', true);
+      }
+    }
+    async function stopLive() {
+      await fetch('/effects/live/stop', {method: 'POST'});
+      refreshLiveStatus();
+    }
+    async function restartLive() {
+      await stopLive();
+      await startLive();
+    }
+    $('#fx-live-start').addEventListener('click', startLive);
+    $('#fx-live-stop').addEventListener('click', stopLive);
+
+    // Status polling — keep running so xrun counter ticks.
+    setInterval(refreshLiveStatus, 1000);
+
+    // Sub-tabs (LIVE / FICHIER)
+    document.querySelectorAll('.fx-subtab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.fx-subtab').forEach(b => b.classList.toggle('active', b === btn));
+        const target = btn.dataset.subtab;
+        $('#fx-subpane-live').style.display = target === 'live' ? '' : 'none';
+        $('#fx-subpane-file').style.display = target === 'file' ? '' : 'none';
+      });
+    });
+
+    // ─── File processing ────────────────────────────────────────────────────
+    const fileState = { file: null };
+
+    function setSelectedFile(f) {
+      fileState.file = f || null;
+      const drop = $('#fx-file-drop');
+      const text = $('#fx-drop-text');
+      const btn  = $('#fx-file-process');
+      if (f) {
+        drop.classList.add('loaded');
+        text.textContent = `${f.name} · ${fmtBytes(f.size)}`;
+        btn.disabled = false;
+      } else {
+        drop.classList.remove('loaded');
+        text.textContent = 'Glisse un fichier audio ici, ou clique pour parcourir';
+        btn.disabled = true;
+      }
+    }
+    (function wireFileDrop() {
+      const drop = $('#fx-file-drop');
+      const input = $('#fx-file-input');
+      if (!drop || !input) return;
+      drop.addEventListener('click', () => input.click());
+      input.addEventListener('change', () => setSelectedFile(input.files[0]));
+      ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
+        e.preventDefault(); drop.classList.add('dragover');
+      }));
+      ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+        e.preventDefault(); drop.classList.remove('dragover');
+      }));
+      drop.addEventListener('drop', e => {
+        const f = e.dataTransfer?.files?.[0];
+        if (f) setSelectedFile(f);
+      });
+    })();
+
+    $('#fx-file-process').addEventListener('click', async () => {
+      if (!fileState.file) return;
+      const btn = $('#fx-file-process');
+      btn.disabled = true;
+      const status = $('#fx-file-status');
+      status.style.display = 'block';
+      status.classList.remove('ok', 'error');
+      status.textContent = 'Traitement en cours…';
+      const fd = new FormData();
+      fd.append('file', fileState.file);
+      fd.append('config', JSON.stringify(readFxFromPrefix('file-fx', true)));
+      const out = $('#fx-file-outname').value.trim();
+      if (out) fd.append('name', out);
+      try {
+        const r = await fetch('/effects/file/process', {method: 'POST', body: fd});
+        const d = await r.json();
+        if (d.ok) {
+          status.classList.add('ok');
+          status.textContent = `✓ Ajouté à la soundboard : ${d.filename}`;
+          refreshSounds();
+        } else {
+          status.classList.add('error');
+          status.textContent = `✗ ${d.error || 'Échec'}`;
+        }
+      } catch (e) {
+        status.classList.add('error');
+        status.textContent = `✗ Erreur réseau`;
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     // ─── Auto-paste on load ──────────────────────────────────────────────────

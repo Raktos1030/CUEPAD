@@ -61,6 +61,7 @@ a = Analysis(
         "audiotsm.wsola",
         "audiotsm.io.array",
         "effects",
+        "live_engine",
         "pynput",
         "pynput.keyboard",
         "pynput.keyboard._win32",

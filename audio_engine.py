@@ -122,30 +122,38 @@ class AudioEngine:
         try:
             import sounddevice as sd
         except Exception as e:
-            return {"outputs": [], "error": f"sounddevice unavailable: {e}"}
+            return {"outputs": [], "inputs": [], "error": f"sounddevice unavailable: {e}"}
 
         try:
             devs = sd.query_devices()
         except Exception as e:
-            return {"outputs": [], "error": str(e)}
+            return {"outputs": [], "inputs": [], "error": str(e)}
 
         default = sd.default.device
+        default_in  = default[0] if isinstance(default, (list, tuple)) else None
         default_out = default[1] if isinstance(default, (list, tuple)) else default
 
-        outputs = []
+        outputs, inputs = [], []
         for i, d in enumerate(devs):
-            if d.get("max_output_channels", 0) <= 0:
-                continue
             name = d.get("name", "")
-            outputs.append({
-                "id": i,
-                "name": name,
-                "default": i == default_out,
-                "virtual": _is_virtual_cable(name),
-                "channels": d.get("max_output_channels", 0),
-                "samplerate": int(d.get("default_samplerate", 44100)),
-            })
-        return {"outputs": outputs}
+            sr   = int(d.get("default_samplerate", 44100))
+            if d.get("max_output_channels", 0) > 0:
+                outputs.append({
+                    "id": i, "name": name,
+                    "default": i == default_out,
+                    "virtual": _is_virtual_cable(name),
+                    "channels": d.get("max_output_channels", 0),
+                    "samplerate": sr,
+                })
+            if d.get("max_input_channels", 0) > 0:
+                inputs.append({
+                    "id": i, "name": name,
+                    "default": i == default_in,
+                    "virtual": _is_virtual_cable(name),
+                    "channels": d.get("max_input_channels", 0),
+                    "samplerate": sr,
+                })
+        return {"outputs": outputs, "inputs": inputs}
 
     # ─── Playback API ──────────────────────────────────────────────────────
     def list_playbacks(self) -> list[dict]:

@@ -95,6 +95,7 @@ def main():
     from library import Library
     from audio_engine import AudioEngine
     from hotkeys import HotkeyManager
+    from live_engine import LiveMicEngine
 
     converter = Converter(downloads_dir=library_dir, ffmpeg_cmd=FFMPEG_CMD)
     library = Library(root=library_dir)
@@ -105,6 +106,7 @@ def main():
         bool(settings.get("monitor_muted", False))
         or not bool(settings.get("monitor_enabled", True))
     )
+    live = LiveMicEngine()
     hotkeys = HotkeyManager()
     hotkeys.set_enabled(bool(settings.get("hotkeys_enabled", True)))
 
@@ -154,6 +156,7 @@ def main():
         converter=converter,
         library=library,
         audio=audio,
+        live=live,
         hotkeys=hotkeys,
         settings=settings,
         on_show=on_show,

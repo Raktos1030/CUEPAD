@@ -25,10 +25,11 @@ app = Flask(__name__, template_folder=str(_template_dir))
 services: dict = {}
 
 
-def configure(*, converter, library, audio, hotkeys, settings, on_show, on_quit):
+def configure(*, converter, library, audio, live, hotkeys, settings, on_show, on_quit):
     services["converter"] = converter
     services["library"] = library
     services["audio"] = audio
+    services["live"] = live
     services["hotkeys"] = hotkeys
     services["settings"] = settings
     services["on_show"] = on_show
@@ -212,6 +213,92 @@ def voices_pause_all():
 def voices_resume_all():
     services["audio"].resume_all()
     return jsonify({"ok": True})
+
+
+# ─────────────────────────── Effects (live + file) ─────────────────────────
+
+@app.route("/effects/live/status")
+def live_status():
+    return jsonify(services["live"].status())
+
+
+@app.route("/effects/live/start", methods=["POST"])
+def live_start():
+    data = request.get_json(silent=True) or {}
+    try:
+        input_dev  = int(data["input"])  if data.get("input")  not in (None, "") else None
+        output_dev = int(data["output"]) if data.get("output") not in (None, "") else None
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "input/output invalides"}), 400
+    if input_dev is None or output_dev is None:
+        return jsonify({"ok": False, "error": "Sélectionne un micro et une sortie"}), 400
+    latency = (data.get("latency") or "low").lower()
+    # Apply incoming config (if any) before start so the first chunk is correct.
+    if "config" in data:
+        services["live"].update_config(_clean_effects(data["config"]) or {})
+    ok, err = services["live"].start(input_dev, output_dev, latency=latency)
+    return jsonify({"ok": ok, "error": err, "status": services["live"].status()})
+
+
+@app.route("/effects/live/stop", methods=["POST"])
+def live_stop():
+    services["live"].stop()
+    return jsonify({"ok": True, "status": services["live"].status()})
+
+
+@app.route("/effects/live/config", methods=["POST"])
+def live_config():
+    data = request.get_json(silent=True) or {}
+    cfg = _clean_effects(data.get("config") or data) or {}
+    services["live"].update_config(cfg)
+    return jsonify({"ok": True, "config": cfg})
+
+
+@app.route("/effects/file/process", methods=["POST"])
+def fx_file_process():
+    """Apply an effects chain offline to an uploaded audio file. Stores the
+    result in the library under `out_name` (or a sanitized auto name)."""
+    import json
+    from werkzeug.utils import secure_filename
+    import io
+    import soundfile as sf
+    from effects import apply_chain
+
+    f = request.files.get("file")
+    if f is None or not f.filename:
+        return jsonify({"ok": False, "error": "Fichier manquant"}), 400
+    cfg_raw = request.form.get("config", "{}")
+    try:
+        cfg = _clean_effects(json.loads(cfg_raw)) or {}
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Config invalide"}), 400
+    out_name = (request.form.get("name") or "").strip()
+    if not out_name:
+        base = secure_filename(f.filename).rsplit(".", 1)[0] or "fx"
+        out_name = f"{base}-fx"
+
+    # Decode through the AudioEngine to reuse its ffmpeg fallback.
+    tmp_dir = Path(services["library"].root) / ".fx-tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    src = tmp_dir / secure_filename(f.filename)
+    f.save(src)
+    try:
+        data, sr, _ch = services["audio"]._decode(str(src))
+        processed = apply_chain(data, sr, cfg)
+        # Save as .wav so soundfile can write any sample rate / channel count.
+        dest = Path(services["library"].root) / f"{out_name}.wav"
+        # If a file with that name exists, suffix with -2, -3, etc.
+        n = 2
+        while dest.exists():
+            dest = Path(services["library"].root) / f"{out_name}-{n}.wav"
+            n += 1
+        sf.write(str(dest), processed, sr, subtype="PCM_16")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Traitement échoué: {e}"}), 500
+    finally:
+        try: src.unlink()
+        except Exception: pass
+    return jsonify({"ok": True, "filename": dest.name})
 
 
 @app.route("/sounds/open-folder", methods=["POST"])
