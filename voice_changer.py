@@ -42,6 +42,31 @@ RMVPE_URL    = "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/
 RMVPE_SIZE   = 181 * 1024 * 1024  # ~181 MB, used for the progress UI
 
 
+def _list_directml_adapters() -> list[dict]:
+    """Enumerate DirectML adapters by index. Windows can expose several:
+    an integrated iGPU on Ryzen Radeon, a discrete card, and even
+    'Microsoft Basic Render Driver'. Picking the wrong one (iGPU) is a
+    common reason DirectML feels slower than CPU.
+    """
+    try:
+        import torch_directml  # type: ignore
+    except Exception:
+        return []
+    out = []
+    try:
+        n = torch_directml.device_count() if hasattr(torch_directml, "device_count") else 0
+    except Exception:
+        n = 0
+    for i in range(n):
+        try:
+            name = (torch_directml.device_name(i)
+                    if hasattr(torch_directml, "device_name") else f"adapter {i}")
+        except Exception:
+            name = f"adapter {i}"
+        out.append({"index": i, "name": name})
+    return out
+
+
 def _detect_device(preferred: str = "auto") -> tuple[str, str]:
     """Pick the best PyTorch device for RVC inference.
 
@@ -49,10 +74,28 @@ def _detect_device(preferred: str = "auto") -> tuple[str, str]:
         device_string is something Pipeline can pass to `.to(...)`,
         label is a short human-readable tag for the UI / logs.
 
-    Order: CUDA (NVIDIA) > DirectML (AMD/Intel on Windows) > CPU.
-    `preferred` accepts 'auto', 'cpu', 'cuda', 'dml' to force a backend.
+    `preferred` accepts:
+        'auto'           — try CUDA → DirectML[0] → CPU
+        'cpu'
+        'cuda'           — fail to CPU if no CUDA
+        'dml' or 'dml:0' — DirectML adapter 0
+        'dml:1', 'dml:N' — explicit DirectML adapter index
     """
-    if preferred not in (None, "auto"):
+    def _dml(idx: int) -> tuple[str, str] | None:
+        try:
+            import torch_directml  # type: ignore
+            if hasattr(torch_directml, "is_available") and not torch_directml.is_available():
+                return None
+            count = torch_directml.device_count() if hasattr(torch_directml, "device_count") else 1
+            if idx >= count:
+                return None
+            name = (torch_directml.device_name(idx)
+                    if hasattr(torch_directml, "device_name") else f"adapter {idx}")
+            return f"privateuseone:{idx}", f"GPU (DirectML: {name})"
+        except Exception:
+            return None
+
+    if preferred and preferred != "auto":
         try:
             import torch
         except Exception:
@@ -61,30 +104,29 @@ def _detect_device(preferred: str = "auto") -> tuple[str, str]:
             return "cpu", "CPU"
         if preferred == "cuda" and torch.cuda.is_available():
             return "cuda:0", f"GPU (CUDA: {torch.cuda.get_device_name(0)})"
-        if preferred == "dml":
-            try:
-                import torch_directml  # type: ignore
-                if torch_directml.is_available():
-                    name = torch_directml.device_name(0) if hasattr(torch_directml, "device_name") else "DirectML"
-                    return "privateuseone:0", f"GPU (DirectML: {name})"
-            except Exception:
-                pass
+        if preferred.startswith("dml"):
+            idx = 0
+            if ":" in preferred:
+                try: idx = int(preferred.split(":", 1)[1])
+                except ValueError: idx = 0
+            r = _dml(idx)
+            if r is not None:
+                return r
         return "cpu", "CPU"
-    # auto
+
+    # auto: CUDA → first DirectML adapter that isn't Microsoft's fallback → CPU
     try:
         import torch
         if torch.cuda.is_available():
             return "cuda:0", f"GPU (CUDA: {torch.cuda.get_device_name(0)})"
     except Exception:
         pass
-    try:
-        import torch_directml  # type: ignore
-        if torch_directml.is_available():
-            name = (torch_directml.device_name(0)
-                    if hasattr(torch_directml, "device_name") else "DirectML")
-            return "privateuseone:0", f"GPU (DirectML: {name})"
-    except Exception:
-        pass
+    for ad in _list_directml_adapters():
+        if "basic render" in ad["name"].lower():
+            continue  # software renderer; never want this
+        r = _dml(ad["index"])
+        if r is not None:
+            return r
     return "cpu", "CPU"
 
 
@@ -149,6 +191,7 @@ class VoiceChanger:
             "device":       self._device,
             "device_label": self._device_label,
             "device_pref":  self._device_pref,
+            "dml_adapters": _list_directml_adapters(),
         }
 
     def list_voices(self) -> list[dict]:

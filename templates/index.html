@@ -1490,11 +1490,13 @@
               <div class="sub" id="vc-device-sub">CPU (lent en live — installe torch-directml pour utiliser ton GPU AMD)</div>
             </div>
             <div class="control">
-              <select class="select" id="vc-device-pref" style="min-width: 180px;">
+              <select class="select" id="vc-device-pref" style="min-width: 280px;">
                 <option value="auto">AUTO (recommandé)</option>
-                <option value="dml">GPU AMD (DirectML)</option>
                 <option value="cuda">GPU NVIDIA (CUDA)</option>
                 <option value="cpu">CPU uniquement</option>
+                <!-- DirectML adapters are appended dynamically by the JS so
+                     the user can pick the discrete GPU explicitly when
+                     auto-detect lands on a weak iGPU. -->
               </select>
             </div>
           </div>
@@ -3196,8 +3198,24 @@
           ? `${s.device_label} — lent en live, OK en offline. Pour ton AMD GPU : pip install torch-directml`
           : `${s.device_label} — accélération GPU active`;
       }
+
+      // Populate explicit DirectML adapters (Windows often exposes both the
+      // iGPU and the discrete card — pick the right one to avoid the slow
+      // integrated Radeon).
       const sel = $('#vc-device-pref');
-      if (sel && s.device_pref) sel.value = s.device_pref;
+      if (sel) {
+        // Strip any previously-injected dml options.
+        Array.from(sel.options).filter(o => o.dataset.dml).forEach(o => o.remove());
+        const adapters = s.dml_adapters || [];
+        adapters.forEach(ad => {
+          const opt = document.createElement('option');
+          opt.value = `dml:${ad.index}`;
+          opt.textContent = `GPU DirectML #${ad.index} — ${ad.name}`;
+          opt.dataset.dml = '1';
+          sel.appendChild(opt);
+        });
+        if (s.device_pref) sel.value = s.device_pref;
+      }
     }
 
     $('#vc-device-pref').addEventListener('change', async () => {
