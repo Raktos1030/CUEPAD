@@ -185,6 +185,8 @@ class LiveRvcEngine:
             "tgt_sr":        self.vc.streaming_target_sr(),
             "presets":       list(CHUNK_PRESETS.keys()),
             "last_peak":     round(float(getattr(self.vc, "last_chunk_peak", 0.0)), 4),
+            # ONNX/DirectML inference time breakdown (None on torch path).
+            "onnx_timings":  getattr(self.vc, "last_onnx_timings", None),
         }
 
     def update_params(self, **kw):

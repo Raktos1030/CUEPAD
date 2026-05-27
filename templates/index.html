@@ -918,6 +918,8 @@
       margin-left: auto;
       font-family: var(--f-mono); font-size: 0.7rem;
       color: var(--text-2); font-variant-numeric: tabular-nums;
+      white-space: pre-line;          /* render \n in the status line */
+      text-align: right;
     }
 
     /* File drop zone */
@@ -3663,7 +3665,13 @@
           st.textContent = `EN MARCHE  ${s.chunk_ms}ms`;
           st.classList.add('running');
           const peak = (s.last_peak != null) ? ` · peak ${s.last_peak.toFixed(3)}` : '';
-          stat.textContent = `UP ${s.uptime_sec}s · INFER ${s.avg_infer_ms}ms · ${s.chunks} chunks · ${s.underruns} xrun${peak}`;
+          let line = `UP ${s.uptime_sec}s · INFER ${s.avg_infer_ms}ms · ${s.chunks} chunks · ${s.underruns} xrun${peak}`;
+          if (s.onnx_timings) {
+            const t = s.onnx_timings;
+            const prov = (t.providers || []).map(p => p.replace('ExecutionProvider', '')).join(',');
+            line += `\nONNX: cvec ${t.cvec_ms}ms · f0 ${t.f0_ms}ms · synth ${t.synth_ms}ms · [${prov}]`;
+          }
+          stat.textContent = line;
         } else {
           st.textContent = 'ARRÊTÉ';
           stat.textContent = '—';

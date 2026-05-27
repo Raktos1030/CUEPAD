@@ -781,9 +781,12 @@ class VoiceChanger:
         pitch = np.rint(f0_mel).astype(np.int64)
         return pitch, f0.astype(np.float32)
 
+    last_onnx_timings: Optional[dict] = None  # for live status display
+
     def _process_chunk_onnx(self, audio_16k, *, f0_up_key, f0_method,
                             index_rate, protect):
         import numpy as np
+        import time as _t
         sess = self._onnx_session
         if sess is None:
             return None
@@ -792,12 +795,16 @@ class VoiceChanger:
 
             # 1. Content features. ContentVec returns (1, 768, T_h); we
             #    upsample 2× along time and transpose to (1, T, 768).
+            t0 = _t.monotonic()
             phone = sess.extract_features(audio)
+            t_cvec = (_t.monotonic() - t0) * 1000.0
             T = phone.shape[1]
             phone_lengths = np.array([T], dtype=np.int64)
 
             # 2. Pitch.
+            t1 = _t.monotonic()
             pitch, pitchf = self._extract_f0_for_onnx(audio, T, f0_up_key, f0_method)
+            t_f0 = (_t.monotonic() - t1) * 1000.0
             pitch  = pitch.reshape(1, -1).astype(np.int64)
             pitchf = pitchf.reshape(1, -1).astype(np.float32)
 
@@ -806,8 +813,19 @@ class VoiceChanger:
             rnd = np.random.randn(1, 192, T).astype(np.float32)
 
             # 4. Run synth.
+            t2 = _t.monotonic()
             int16 = sess.infer(phone, phone_lengths, pitch, pitchf, ds, rnd)
+            t_synth = (_t.monotonic() - t2) * 1000.0
             out = int16.squeeze().astype(np.float32) / 32768.0
+
+            # Stash the breakdown so the live UI can show where the time
+            # actually goes — DML overhead vs CPU F0 vs synth.
+            self.last_onnx_timings = {
+                "cvec_ms":  round(t_cvec, 1),
+                "f0_ms":    round(t_f0,   1),
+                "synth_ms": round(t_synth, 1),
+                "providers": list(getattr(sess, "active_providers", [])),
+            }
         except Exception as e:
             import traceback
             self.last_chunk_error = (
