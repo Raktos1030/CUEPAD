@@ -97,6 +97,7 @@ def main():
     from hotkeys import HotkeyManager
     from live_engine import LiveMicEngine
     from voice_changer import VoiceChanger
+    from live_rvc import LiveRvcEngine
 
     converter = Converter(downloads_dir=library_dir, ffmpeg_cmd=FFMPEG_CMD)
     library = Library(root=library_dir)
@@ -111,6 +112,7 @@ def main():
     voices_dir = APP_DATA / "voices"
     voices_dir.mkdir(parents=True, exist_ok=True)
     voice_changer = VoiceChanger(voices_dir=voices_dir)
+    live_rvc = LiveRvcEngine(voice_changer=voice_changer)
     hotkeys = HotkeyManager()
     hotkeys.set_enabled(bool(settings.get("hotkeys_enabled", True)))
 
@@ -162,6 +164,7 @@ def main():
         audio=audio,
         live=live,
         voice_changer=voice_changer,
+        live_rvc=live_rvc,
         hotkeys=hotkeys,
         settings=settings,
         on_show=on_show,

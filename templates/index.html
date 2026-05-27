@@ -1556,6 +1556,76 @@
           </button>
           <div class="fx-file-status" id="vc-job-status" style="display: none;"></div>
         </div>
+
+        <div class="card" style="margin-top: 18px;">
+          <h2 class="section-title">Live sur le micro</h2>
+          <div class="fx-panel-hint" style="margin-bottom: 12px;">
+            Pipe ton micro à travers RVC en temps réel — la voix sort sur la sortie choisie (généralement un câble virtuel pour Discord/OBS). Sur CPU c'est lent (~1.5-3s de latence) ; pour du temps réel utilisable il faut du GPU (DirectML AMD ou CUDA NVIDIA).
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Microphone</div>
+              <select class="select" id="vc-live-input"></select>
+            </div>
+            <div class="field">
+              <div class="group-label">Sortie</div>
+              <select class="select" id="vc-live-output"></select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Voix IA</div>
+              <select class="select" id="vc-live-voice"></select>
+            </div>
+            <div class="field">
+              <div class="group-label">Latence / qualité</div>
+              <div class="seg" id="vc-live-latency-seg">
+                <button class="seg-btn" data-value="low">BASSE 400 MS</button>
+                <button class="seg-btn active" data-value="medium">MOY 700 MS</button>
+                <button class="seg-btn" data-value="high">HAUTE 1.1 S</button>
+                <button class="seg-btn" data-value="safe">SAFE 1.5 S</button>
+              </div>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Décalage pitch <span class="fx-mod-val" id="vc-live-pitch-val" style="display:inline-block;">0 st</span></div>
+              <input type="range" min="-12" max="12" step="1" value="0" class="slider" id="vc-live-pitch"/>
+            </div>
+            <div class="field">
+              <div class="group-label">Méthode F0</div>
+              <div class="seg" id="vc-live-f0-seg">
+                <button class="seg-btn active" data-value="rmvpe">RMVPE</button>
+                <button class="seg-btn" data-value="crepe">CREPE</button>
+                <button class="seg-btn" data-value="harvest">HARVEST</button>
+                <button class="seg-btn" data-value="pm">PM</button>
+              </div>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Force de l'index <span class="fx-mod-val" id="vc-live-index-val" style="display:inline-block;">50%</span></div>
+              <input type="range" min="0" max="100" step="5" value="50" class="slider" id="vc-live-index"/>
+            </div>
+            <div class="field">
+              <div class="group-label">État</div>
+              <div class="fx-live-status">
+                <span class="fx-live-state" id="vc-live-state">ARRÊTÉ</span>
+                <span class="fx-live-stat" id="vc-live-stat">—</span>
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button class="btn primary" id="vc-live-start">
+              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+              DÉMARRER
+            </button>
+            <button class="btn danger" id="vc-live-stop" style="display: none;">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              ARRÊTER
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3077,6 +3147,12 @@
         renderVoiceAiStatus(st);
         renderVoiceList(vs.items || []);
         await refreshVoiceAiSources();
+        // Live RVC section uses the same voice list + needs the input devices.
+        if (typeof refreshLiveRvcDevices === 'function') {
+          await refreshLiveRvcDevices();
+          refreshLiveRvcVoices();
+          refreshLiveRvcStatus();
+        }
       } catch {}
     }
 
@@ -3133,6 +3209,8 @@
         ? items.map(v => `<option value="${escapeAttr(v.name)}">${escapeHtml(v.name)}</option>`).join('')
         : `<option value="">Aucune voix importée</option>`;
       updateConvertEnabled();
+      // Mirror into the live RVC voice picker.
+      if (typeof refreshLiveRvcVoices === 'function') refreshLiveRvcVoices();
     }
 
     async function refreshVoiceAiSources() {
@@ -3268,6 +3346,144 @@
       }
     }
 
+    // ─── Live RVC on the mic ────────────────────────────────────────────────
+    const liveRvcState = { running: false, latency: 'medium', voice: null };
+
+    // Wire the existing per-voice dropdowns to the live picker too.
+    function refreshLiveRvcDevices() {
+      try {
+        return fetch('/devices').then(r => r.json()).then(d => {
+          const fill = (el, list, hint) => {
+            if (!el) return;
+            el.innerHTML = list.length
+              ? list.map(x => {
+                  const tag = x.virtual ? ' [VIRTUEL]' : (x.default ? ' [DÉFAUT]' : '');
+                  return `<option value="${x.id}">${escapeHtml(x.name)}${tag}</option>`;
+                }).join('')
+              : `<option value="">${hint}</option>`;
+          };
+          fill($('#vc-live-input'),  d.inputs  || [], 'Aucun micro');
+          fill($('#vc-live-output'), d.outputs || [], 'Aucune sortie');
+        });
+      } catch {}
+    }
+
+    function refreshLiveRvcVoices() {
+      // Reuse the voice list rendered by refreshVoiceAi().
+      const opts = state.sounds; // dummy
+      const sel = $('#vc-live-voice');
+      const voices = Array.from($('#vc-voice').options || []).map(o => o.value).filter(Boolean);
+      sel.innerHTML = voices.length
+        ? voices.map(v => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join('')
+        : `<option value="">Importe une voix d'abord</option>`;
+    }
+
+    // (refreshVoiceAi / renderVoiceList call us back directly — no monkey-patch.)
+
+    // Sliders for live RVC params
+    $('#vc-live-pitch').addEventListener('input', () => {
+      const v = parseInt($('#vc-live-pitch').value, 10);
+      $('#vc-live-pitch-val').textContent = v === 0 ? '0 st' : (v > 0 ? `+${v} st` : `${v} st`);
+      $('#vc-live-pitch-val').classList.toggle('off', v === 0);
+      if (liveRvcState.running) postLiveRvcParams();
+    });
+    $('#vc-live-index').addEventListener('input', () => {
+      $('#vc-live-index-val').textContent = `${$('#vc-live-index').value}%`;
+      if (liveRvcState.running) postLiveRvcParams();
+    });
+    $('#vc-live-f0-seg').addEventListener('click', e => {
+      const b = e.target.closest('.seg-btn');
+      if (!b) return;
+      $$('#vc-live-f0-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+      if (liveRvcState.running) postLiveRvcParams();
+    });
+    $('#vc-live-latency-seg').addEventListener('click', e => {
+      const b = e.target.closest('.seg-btn');
+      if (!b) return;
+      $$('#vc-live-latency-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+      liveRvcState.latency = b.dataset.value;
+      // Restart needed to apply a new chunk size.
+      if (liveRvcState.running) (async () => { await stopLiveRvc(); await startLiveRvc(); })();
+    });
+
+    async function postLiveRvcParams() {
+      const f0_method = document.querySelector('#vc-live-f0-seg .seg-btn.active').dataset.value;
+      try {
+        await fetch('/voice-ai/live/params', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            f0_up_key:  parseInt($('#vc-live-pitch').value, 10),
+            f0_method,
+            index_rate: parseInt($('#vc-live-index').value, 10) / 100,
+          }),
+        });
+      } catch {}
+    }
+
+    async function startLiveRvc() {
+      const input = $('#vc-live-input').value;
+      const output = $('#vc-live-output').value;
+      const voice = $('#vc-live-voice').value;
+      if (!input || !output || !voice) {
+        toast('Sélectionne micro, sortie et voix', true);
+        return;
+      }
+      const f0_method = document.querySelector('#vc-live-f0-seg .seg-btn.active').dataset.value;
+      const body = {
+        input, output, voice,
+        latency:    liveRvcState.latency,
+        f0_up_key:  parseInt($('#vc-live-pitch').value, 10),
+        f0_method,
+        index_rate: parseInt($('#vc-live-index').value, 10) / 100,
+      };
+      $('#vc-live-state').textContent = 'INIT…';
+      try {
+        const r = await fetch('/voice-ai/live/start', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (!d.ok) {
+          toast(d.error || 'Démarrage échoué', true);
+          $('#vc-live-state').textContent = 'ERREUR';
+          $('#vc-live-state').classList.add('error');
+        }
+        refreshLiveRvcStatus();
+      } catch {
+        toast('Erreur réseau', true);
+      }
+    }
+    async function stopLiveRvc() {
+      await fetch('/voice-ai/live/stop', {method: 'POST'});
+      refreshLiveRvcStatus();
+    }
+    $('#vc-live-start').addEventListener('click', startLiveRvc);
+    $('#vc-live-stop').addEventListener('click', stopLiveRvc);
+
+    async function refreshLiveRvcStatus() {
+      try {
+        const r = await fetch('/voice-ai/live/status');
+        const s = await r.json();
+        liveRvcState.running = !!s.running;
+        const st = $('#vc-live-state'), stat = $('#vc-live-stat');
+        st.classList.remove('running', 'error');
+        if (s.error) {
+          st.textContent = 'ERREUR';
+          st.classList.add('error');
+          stat.textContent = s.error;
+        } else if (s.running) {
+          st.textContent = `EN MARCHE  ${s.chunk_ms}ms`;
+          st.classList.add('running');
+          stat.textContent = `UP ${s.uptime_sec}s · INFER ${s.avg_infer_ms}ms · ${s.chunks} chunks · ${s.underruns} xrun`;
+        } else {
+          st.textContent = 'ARRÊTÉ';
+          stat.textContent = '—';
+        }
+        $('#vc-live-start').style.display = s.running ? 'none' : 'inline-flex';
+        $('#vc-live-stop').style.display  = s.running ? 'inline-flex' : 'none';
+      } catch {}
+    }
+    setInterval(refreshLiveRvcStatus, 1000);
 
     // ─── File processing ────────────────────────────────────────────────────
     const fileState = { file: null };

@@ -63,6 +63,7 @@ a = Analysis(
         "effects",
         "live_engine",
         "voice_changer",
+        "live_rvc",
         "rvc_lib",
         "rvc_lib.models",
         "rvc_lib.modules",

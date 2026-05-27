@@ -339,3 +339,71 @@ class VoiceChanger:
             except Exception as e:
                 return False, f"Sauvegarde WAV échouée: {e}"
         return True, None
+
+    # ─── Streaming inference (for live mic conversion) ─────────────────────
+    def prepare_for_streaming(self, voice_name: str) -> tuple[bool, Optional[str]]:
+        """Load the voice + hubert once so process_chunk() can be called in a
+        tight loop without paying the warm-up cost on every block."""
+        with self._lock:
+            try:
+                self._load_voice(voice_name)
+                self._ensure_hubert()
+                return True, None
+            except Exception as e:
+                self._init_error = str(e)
+                return False, str(e)
+
+    def streaming_target_sr(self) -> int | None:
+        return self._tgt_sr
+
+    def process_chunk(
+        self,
+        audio_16k,  # 1D float32 numpy array, mono at 16 kHz
+        *,
+        f0_up_key: int = 0,
+        f0_method: str = "rmvpe",
+        index_rate: float = 0.5,
+        protect: float = 0.33,
+        rms_mix_rate: float = 0.25,
+        filter_radius: int = 3,
+    ):
+        """Run a single Pipeline pass on `audio_16k`. Returns the output at
+        the voice's target SR as a float32 numpy array (normalised to [-1,1])
+        — or None if the model isn't loaded yet.
+
+        Caller is responsible for chunk windowing / crossfading so the
+        boundaries don't click. We don't lock here because the live worker
+        thread holds the only reference and the model state is read-only
+        during inference.
+        """
+        if self._pipeline is None or self._net_g is None or self._hubert is None:
+            return None
+        import numpy as np
+        # Pipeline.pipeline returns int16 — convert back to float for mixing.
+        idx_dir = self.voices_dir / (self._current or "")
+        idx_files = list(idx_dir.glob("*.index")) if idx_dir.exists() else []
+        file_index = str(idx_files[0]) if idx_files else ""
+        try:
+            audio_opt = self._pipeline.pipeline(
+                self._hubert,
+                self._net_g,
+                0,
+                audio_16k,
+                "live_chunk",   # dummy path — only used for logging
+                [0, 0, 0],
+                int(f0_up_key),
+                str(f0_method),
+                file_index,
+                float(index_rate),
+                self._if_f0,
+                int(filter_radius),
+                self._tgt_sr,
+                0,
+                float(rms_mix_rate),
+                self._version,
+                float(protect),
+                None,
+            )
+        except Exception:
+            return None
+        return audio_opt.astype(np.float32) / 32768.0

@@ -25,12 +25,13 @@ app = Flask(__name__, template_folder=str(_template_dir))
 services: dict = {}
 
 
-def configure(*, converter, library, audio, live, voice_changer, hotkeys, settings, on_show, on_quit):
+def configure(*, converter, library, audio, live, voice_changer, live_rvc, hotkeys, settings, on_show, on_quit):
     services["converter"] = converter
     services["library"] = library
     services["audio"] = audio
     services["live"] = live
     services["voice_changer"] = voice_changer
+    services["live_rvc"] = live_rvc
     services["hotkeys"] = hotkeys
     services["settings"] = settings
     services["on_show"] = on_show
@@ -376,6 +377,50 @@ def vc_jobs_status(job_id):
     if not j:
         return jsonify({"error": "Job inconnu"}), 404
     return jsonify(j)
+
+
+# Live RVC on the mic
+@app.route("/voice-ai/live/status")
+def vc_live_status():
+    return jsonify(services["live_rvc"].status())
+
+
+@app.route("/voice-ai/live/start", methods=["POST"])
+def vc_live_start():
+    data = request.get_json(silent=True) or {}
+    try:
+        input_dev  = int(data["input"])  if data.get("input")  not in (None, "") else None
+        output_dev = int(data["output"]) if data.get("output") not in (None, "") else None
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "input/output invalides"}), 400
+    voice = (data.get("voice") or "").strip()
+    if not input_dev or not output_dev or not voice:
+        return jsonify({"ok": False, "error": "micro, sortie et voix requis"}), 400
+    params = {
+        "f0_up_key":   int(data.get("f0_up_key") or 0),
+        "f0_method":   str(data.get("f0_method") or "rmvpe"),
+        "index_rate":  float(data.get("index_rate") or 0.5),
+        "protect":     float(data.get("protect") or 0.33),
+    }
+    latency = (data.get("latency") or "medium").lower()
+    ok, err = services["live_rvc"].start(input_dev, output_dev, voice, latency=latency, **params)
+    return jsonify({"ok": ok, "error": err, "status": services["live_rvc"].status()})
+
+
+@app.route("/voice-ai/live/stop", methods=["POST"])
+def vc_live_stop():
+    services["live_rvc"].stop()
+    return jsonify({"ok": True})
+
+
+@app.route("/voice-ai/live/params", methods=["POST"])
+def vc_live_params():
+    data = request.get_json(silent=True) or {}
+    services["live_rvc"].update_params(**{
+        k: data[k] for k in ("f0_up_key", "f0_method", "index_rate", "protect", "rms_mix_rate")
+        if k in data
+    })
+    return jsonify({"ok": True})
 
 
 @app.route("/effects/file/process", methods=["POST"])
