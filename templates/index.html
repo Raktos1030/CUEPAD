@@ -3665,7 +3665,9 @@
           st.textContent = `EN MARCHE  ${s.chunk_ms}ms`;
           st.classList.add('running');
           const peak = (s.last_peak != null) ? ` · peak ${s.last_peak.toFixed(3)}` : '';
-          let line = `UP ${s.uptime_sec}s · INFER ${s.avg_infer_ms}ms · ${s.chunks} chunks · ${s.underruns} xrun${peak}`;
+          const backend = s.backend ? ` · ${s.backend.toUpperCase()}` : '';
+          const dev = s.device_label ? ` (${s.device_label})` : '';
+          let line = `UP ${s.uptime_sec}s · INFER ${s.avg_infer_ms}ms · ${s.chunks} chunks · ${s.underruns} xrun${peak}${backend}${dev}`;
           if (s.onnx_timings) {
             const t = s.onnx_timings;
             const prov = (t.providers || []).map(p => p.replace('ExecutionProvider', '')).join(',');

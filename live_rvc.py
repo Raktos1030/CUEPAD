@@ -187,6 +187,9 @@ class LiveRvcEngine:
             "last_peak":     round(float(getattr(self.vc, "last_chunk_peak", 0.0)), 4),
             # ONNX/DirectML inference time breakdown (None on torch path).
             "onnx_timings":  getattr(self.vc, "last_onnx_timings", None),
+            # Which compute path is actually live ('onnx' vs 'torch').
+            "backend":       "onnx" if getattr(self.vc, "_onnx_session", None) else "torch",
+            "device_label":  getattr(self.vc, "_device_label", "?"),
         }
 
     def update_params(self, **kw):
