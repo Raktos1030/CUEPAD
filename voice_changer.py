@@ -465,8 +465,9 @@ class VoiceChanger:
         # ContentVec ONNX is shared across voices — keep one copy in _base.
         # We bake it locally from the same HubertModel weights the torch
         # path uses; reuse the HF cache so the weights aren't pulled twice.
-        # .v2 suffix bumps the cache for the onnxsim pass added in v5 synth.
-        cvec_onnx = self.base_dir / "vec-768-layer-12.v2.onnx"
+        # .v3 bumps the cache for the auto-mixed-precision FP16 pass we
+        # now apply to the HuBERT graph (was just simplified FP32 in v2).
+        cvec_onnx = self.base_dir / "vec-768-layer-12.v3.onnx"
         if not cvec_onnx.exists() or cvec_onnx.stat().st_size < 100_000_000:
             export_contentvec_to_onnx(cvec_onnx, cache_dir=str(self.hf_cache_dir))
 
@@ -758,7 +759,16 @@ class VoiceChanger:
     def _extract_f0_for_onnx(self, audio_16k, target_len: int,
                              f0_up_key: float, f0_method: str):
         """Compute (pitch_quantized, pitchf_hz) at frame rate matching the
-        ContentVec ONNX feature stream (one frame per 160 audio samples)."""
+        ContentVec ONNX feature stream. Wraps the split _extract_f0_raw +
+        _resize_and_quantize_f0 helpers for backwards compatibility."""
+        f0 = self._extract_f0_raw(audio_16k, f0_up_key, f0_method)
+        return self._resize_and_quantize_f0(f0, target_len)
+
+    def _extract_f0_raw(self, audio_16k, f0_up_key, f0_method):
+        """Heavy compute path: run the F0 detector + user pitch shift.
+        Returns f0 at the detector's native frame rate. Split out from
+        the resize so it can run in a background thread in parallel with
+        cvec on DML — caller resizes to the synth's actual T after."""
         import numpy as np
         f0_min, f0_max = 50.0, 1100.0
         if f0_method == "rmvpe":
@@ -788,16 +798,20 @@ class VoiceChanger:
                 f0_t[pd < 0.1] = 0
                 f0 = f0_t[0].cpu().numpy().astype(np.float32)
 
-        # User pitch shift.
-        f0 = f0 * (2.0 ** (float(f0_up_key) / 12.0))
+        return f0 * (2.0 ** (float(f0_up_key) / 12.0))
 
-        # Resize to target_len (linear interp on non-zero pitch).
+    def _resize_and_quantize_f0(self, f0, target_len):
+        """Resize raw f0 to the synth's T_target and quantize to the
+        1..255 MIDI-like bins the synth expects on its pitch input.
+        Fast (~1 ms) — runs on the main thread after cvec gives us
+        the exact T."""
+        import numpy as np
+        f0_min, f0_max = 50.0, 1100.0
         if f0.shape[0] != target_len:
             old_x = np.linspace(0.0, 1.0, max(1, f0.shape[0]), dtype=np.float32)
             new_x = np.linspace(0.0, 1.0, target_len, dtype=np.float32)
             f0 = np.interp(new_x, old_x, f0).astype(np.float32)
 
-        # Quantize to 1..255 MIDI-like bins for the synth's pitch input.
         f0_mel_min = 1127.0 * np.log(1.0 + f0_min / 700.0)
         f0_mel_max = 1127.0 * np.log(1.0 + f0_max / 700.0)
         f0_mel = 1127.0 * np.log(1.0 + f0 / 700.0)
@@ -809,6 +823,17 @@ class VoiceChanger:
         f0_mel = np.clip(f0_mel, 1.0, 255.0)
         pitch = np.rint(f0_mel).astype(np.int64)
         return pitch, f0.astype(np.float32)
+
+    def _get_f0_executor(self):
+        """Single-worker pool that runs the heavy F0 extractor in
+        parallel with cvec on DML. Lazy because importing concurrent
+        only when ONNX live path is hit."""
+        if not hasattr(self, "_f0_executor_inst"):
+            import concurrent.futures
+            self._f0_executor_inst = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="vc-f0",
+            )
+        return self._f0_executor_inst
 
     last_onnx_timings: Optional[dict] = None  # for live status display
 
@@ -822,7 +847,14 @@ class VoiceChanger:
         try:
             audio = np.asarray(audio_16k, dtype=np.float32)
 
-            # 1. Content features. ContentVec returns (1, 768, T_h); we
+            # 1. Submit the heavy F0 extractor to the CPU background worker
+            #    so it overlaps with cvec on DML. F0 doesn't need to know
+            #    T yet — we resize on the main thread once cvec returns.
+            f0_future = self._get_f0_executor().submit(
+                self._extract_f0_raw, audio, f0_up_key, f0_method,
+            )
+
+            # 2. Content features. ContentVec returns (1, 768, T_h); we
             #    upsample 2× along time and transpose to (1, T, 768).
             t0 = _t.monotonic()
             phone = sess.extract_features(audio)
@@ -830,9 +862,12 @@ class VoiceChanger:
             T = phone.shape[1]
             phone_lengths = np.array([T], dtype=np.int64)
 
-            # 2. Pitch.
+            # 3. Wait for the background F0, then resize+quantize. If F0
+            #    already finished during cvec (typical: F0 ~47 ms, cvec
+            #    ~109 ms on DML), t_f0 below reports only the resize.
             t1 = _t.monotonic()
-            pitch, pitchf = self._extract_f0_for_onnx(audio, T, f0_up_key, f0_method)
+            f0_raw = f0_future.result()
+            pitch, pitchf = self._resize_and_quantize_f0(f0_raw, T)
             t_f0 = (_t.monotonic() - t1) * 1000.0
             pitch  = pitch.reshape(1, -1).astype(np.int64)
             pitchf = pitchf.reshape(1, -1).astype(np.float32)

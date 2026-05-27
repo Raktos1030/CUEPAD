@@ -97,49 +97,55 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
 
 
 def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
+    """Synth-specific wrapper around the generic mixed-precision pass."""
+    import numpy as _np
+    T = 64
+    feed = {
+        'phone':         _np.random.randn(1, T, 768).astype(_np.float32),
+        'phone_lengths': _np.array([T], dtype=_np.int64),
+        'pitch':         _np.random.randint(5, 255, size=(1, T)).astype(_np.int64),
+        'pitchf':        _np.random.uniform(50, 500, size=(1, T)).astype(_np.float32),
+        'ds':            _np.array([0], dtype=_np.int64),
+        'rnd':           _np.random.randn(1, 192, T).astype(_np.float32),
+    }
+    _try_fp16_then_fp32_with_feed(
+        src_fp32=fp32_path, dst=final_path, feed=feed, label="synth",
+    )
+
+
+def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
+                                  feed: dict, label: str) -> None:
     """Best-effort mixed-precision conversion with FP32 fallback.
 
-    Static `convert_float_to_float16 + node_block_list` blew up on this
-    graph two different ways (NSF source generator Cast nodes, then
-    enc_p Cast nodes — there were probably more lurking). Instead, use
+    Static `convert_float_to_float16 + node_block_list` kept blowing up
+    on this graph (NSF Cast nodes, then enc_p Cast nodes, then more —
+    new patterns kept surfacing per export). Instead, use
     `auto_convert_mixed_precision`: it runs the model in FP32 first to
     capture a reference output, then iteratively tries to convert
     subsets of nodes to FP16, accepting only the subsets whose output
     stays within rtol/atol of reference. Produces a graph that is FP16
     where it's safe and FP32 where it isn't — no manual blocklist
     maintenance, and the result is guaranteed loadable by ORT (because
-    the conversion itself ran inference to validate).
+    the conversion itself ran inference to validate). On any failure,
+    the simplified FP32 graph is used unchanged.
     """
     import shutil
-    import numpy as _np
     try:
         import onnx as _onnx
         from onnxconverter_common.auto_mixed_precision import (
             auto_convert_mixed_precision,
         )
     except ImportError:
-        print("[VC] onnxconverter-common absent — synth en FP32 (plus lent). "
-              "Installe : pip install onnxconverter-common", flush=True)
-        shutil.copy2(fp32_path, final_path)
+        print(f"[VC] onnxconverter-common absent — {label} en FP32 "
+              f"(plus lent). Installe : pip install onnxconverter-common",
+              flush=True)
+        shutil.copy2(src_fp32, dst)
         return
 
     try:
-        model_proto = _onnx.load(fp32_path)
-        # Realistic feed at a typical live T (~640ms chunk worth). The
-        # converter validates the FP16 candidate against the FP32
-        # reference using these inputs, so they need to exercise the
-        # graph at production-like shape and value range.
-        T = 64
-        feed = {
-            'phone':         _np.random.randn(1, T, 768).astype(_np.float32),
-            'phone_lengths': _np.array([T], dtype=_np.int64),
-            'pitch':         _np.random.randint(5, 255, size=(1, T)).astype(_np.int64),
-            'pitchf':        _np.random.uniform(50, 500, size=(1, T)).astype(_np.float32),
-            'ds':            _np.array([0], dtype=_np.int64),
-            'rnd':           _np.random.randn(1, 192, T).astype(_np.float32),
-        }
-        print("[VC] auto-mixed-precision conversion — slow (1-5 min) but "
-              "cached per voice…", flush=True)
+        model_proto = _onnx.load(src_fp32)
+        print(f"[VC] {label} auto-mixed-precision — slow (1-5 min) but "
+              f"cached…", flush=True)
         converted = auto_convert_mixed_precision(
             model_proto,
             feed,
@@ -147,20 +153,20 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
             atol=1e-2,
             keep_io_types=True,
         )
-        _onnx.save(converted, final_path)
-        size_mb = Path(final_path).stat().st_size // (1024 * 1024)
-        # Count FP16-converted nodes for a rough sense of coverage.
+        _onnx.save(converted, dst)
+        size_mb = Path(dst).stat().st_size // (1024 * 1024)
         fp16_count = sum(
             1 for n in converted.graph.node
             for a in n.attribute
             if a.name == 'to' and a.i == _onnx.TensorProto.FLOAT16
         )
-        print(f"[VC] synth ONNX mixed-precision saved — {size_mb} MB, "
+        print(f"[VC] {label} ONNX mixed-precision saved — {size_mb} MB, "
               f"~{fp16_count} FP16 ops", flush=True)
     except Exception as e:
-        print(f"[VC] mixed-precision failed ({type(e).__name__}: {e}) — "
-              f"fallback FP32 (simplified)", flush=True)
-        shutil.copy2(fp32_path, final_path)
+        print(f"[VC] {label} mixed-precision failed "
+              f"({type(e).__name__}: {e}) — fallback FP32 (simplified)",
+              flush=True)
+        shutil.copy2(src_fp32, dst)
 
 
 def export_contentvec_to_onnx(dest_path: str | Path,
@@ -235,7 +241,23 @@ def export_contentvec_to_onnx(dest_path: str | Path,
             do_constant_folding=True,
         )
     _simplify_onnx_in_place(str(tmp), label="contentvec")
-    tmp.replace(dest)
+    # FP16 the HuBERT graph too — cvec is ~109 ms FP32 on DML at T=70,
+    # FP16 typically brings that to ~60-80 ms. Same auto-validated
+    # conversion as the synth: only ops whose output stays within
+    # rtol/atol of FP32 get converted. Voice-like dummy (sigma=0.1)
+    # so the validator sees realistic activations, not noise.
+    import numpy as _np
+    cvec_feed = {
+        "source": (_np.random.randn(1, 1, 16000) * 0.1).astype(_np.float32),
+    }
+    try:
+        _try_fp16_then_fp32_with_feed(
+            src_fp32=str(tmp), dst=str(dest),
+            feed=cvec_feed, label="contentvec",
+        )
+    finally:
+        try: tmp.unlink()
+        except OSError: pass
 
     if progress_cb:
         progress_cb(3, 3)
