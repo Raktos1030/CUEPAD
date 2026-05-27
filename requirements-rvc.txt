@@ -1,21 +1,27 @@
 # Optional dependencies for the AI voice changer (Effets → Voix IA tab).
 # Install with: pip install -r requirements-rvc.txt
 #
-# These are NOT bundled in the Q-Pad installer because PyTorch alone weighs
+# These are NOT bundled in the Q-Pad installer because torch alone weighs
 # ~1.5 GB and would 30× the installer size. Dev-mode users (running
 # `python main.py` from a clone) install them once and the Voix IA tab
 # becomes functional.
 #
-# On Windows with an AMD GPU (DirectML), see https://pytorch.org/get-started
-# for the right install command. The defaults below pull CPU-only wheels,
-# which still work fine on a Ryzen 9700X-class chip — RVC inference on a
-# 5-second clip lands around 20-40 s on CPU.
+# Stack: vendored RVC synthesizer (rvc_lib/) + HuggingFace transformers
+# HuBERT (ContentVec) + RMVPE / torchcrepe / pyworld / parselmouth for
+# pitch detection. No fairseq, no omegaconf, no hydra — installs cleanly
+# on plain Python 3.11 + Windows wheels, no MSVC Build Tools needed.
 
 torch
 torchaudio
-rvc-python
-librosa
+transformers
 faiss-cpu
-av
-pyworld
-praat-parselmouth
+librosa
+soundfile
+numpy
+scipy
+requests
+
+# Pitch extractors — pick rmvpe in the UI for best quality.
+torchcrepe          # 'crepe' pitch method
+pyworld             # 'harvest' / 'dio' pitch methods
+praat-parselmouth   # 'pm' pitch method

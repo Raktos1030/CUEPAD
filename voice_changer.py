@@ -1,19 +1,31 @@
-"""RVC offline voice changer.
+"""RVC offline voice changer — fairseq-free path.
 
-Loads a user-supplied RVC model (.pth + .index) and converts the timbre of an
-audio file to that voice. Inference is delegated to `rvc_python`, which
-bundles the HuBERT feature extractor, RMVPE/Crepe/Harvest/PM pitch
-extractors, and the RVC synthesizer. On first use it downloads the base
-HuBERT / RMVPE assets (~540 MB) into its own data dir.
+The first version of this module wrapped `rvc-python`. That dragged in
+fairseq, omegaconf 2.0.6 (broken metadata), hydra-core 1.0.x, antlr4
+4.8, and a C++ build of fairseq's libbleu — Windows + Python 3.11 hit
+"Microsoft Visual C++ Build Tools required" the moment pip tried to
+compile fairseq. Nope.
 
-Models live as one subdirectory per voice:
+This rewrite vendors the RVC model architectures (rvc_lib/) and loads
+HuBERT via `transformers.HubertModel` using the `lengyue233/content-vec-best`
+weights, which are the same ContentVec weights upstream RVC ships in the
+fairseq format. Net result: no fairseq, no omegaconf, no hydra, no C++
+compilation, install through plain pip wheels on Python 3.11 Windows.
+
+Voices live as one subdirectory per voice under <voices_dir>:
     <voices_dir>/mbappe/mbappe.pth
     <voices_dir>/mbappe/added_*.index   (optional)
 
-`import_voice(...)` ingests a flat .pth (+optional .index) the user drops via
-the UI by moving them into a new subdir. `list_voices()` reports what's
-ready. `convert_file(...)` runs inference off-thread (callers should already
-be inside a worker — we don't spawn here so the call blocks).
+Base assets (HuBERT auto-downloaded by transformers, plus rmvpe.pt that
+we download manually) cache to <voices_dir>/_base/.
+
+Limitations:
+- Only RVC v2 .pth models are supported (the common 2025 case). v1
+  models need a `final_proj` 768→256 layer that ships inside fairseq's
+  HuBERT checkpoint; the HuggingFace ContentVec weights don't include
+  it. v1 voices will be refused with a clear error message.
+- CPU inference only for now. AMD GPUs via DirectML would need
+  torch-directml and a few more lines — left as a follow-up.
 """
 from __future__ import annotations
 
@@ -24,35 +36,63 @@ from pathlib import Path
 from typing import Optional
 
 
-# Pitch extractor presets exposed to the UI — name → method passed to rvc.
 PITCH_METHODS = ["rmvpe", "crepe", "harvest", "pm"]
+
+RMVPE_URL    = "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/rmvpe.pt"
+RMVPE_SIZE   = 181 * 1024 * 1024  # ~181 MB, used for the progress UI
+
+
+class _Config:
+    """Minimal stand-in for rvc-python's Config object — Pipeline only reads
+    a handful of attributes off this, so we hand-roll just those."""
+    def __init__(self, device: str = "cpu", is_half: bool = False):
+        self.device  = device
+        self.is_half = is_half
+        # Chunk sizes copied from rvc-python's CPU defaults. They drive how
+        # the input audio is windowed during inference — these values keep
+        # peak memory bounded on commodity hardware.
+        self.x_pad    = 1
+        self.x_query  = 6
+        self.x_center = 38
+        self.x_max    = 41
 
 
 class VoiceChanger:
     def __init__(self, voices_dir: Path):
         self.voices_dir = Path(voices_dir)
         self.voices_dir.mkdir(parents=True, exist_ok=True)
-        self._rvc = None
-        self._current_model: Optional[str] = None
-        self._lock = threading.Lock()
+        self.base_dir = self.voices_dir / "_base"
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.hf_cache_dir = self.base_dir / "hf"
+        self.hf_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        self._hubert     = None  # HubertContentExtractor
+        self._net_g      = None  # vendored synthesizer
+        self._pipeline   = None  # vendored Pipeline
+        self._tgt_sr     = None
+        self._if_f0      = 1
+        self._version    = "v2"
+        self._current    = None
+        self._cpt        = None
         self._init_error: Optional[str] = None
-        self._init_ts: Optional[float] = None
+        self._lock = threading.Lock()
 
     # ─── Status / introspection ────────────────────────────────────────────
     def status(self) -> dict:
         return {
-            "ready":        self._rvc is not None,
+            "ready":        self._pipeline is not None,
             "init_error":   self._init_error,
-            "current":      self._current_model,
+            "current":      self._current,
             "voices_dir":   str(self.voices_dir),
             "voice_count":  len(self.list_voices()),
             "pitch_methods": PITCH_METHODS,
         }
 
     def list_voices(self) -> list[dict]:
-        """Each voice subdirectory containing at least one .pth is a voice."""
+        if not self.voices_dir.exists():
+            return []
         out = []
-        for sub in sorted(self.voices_dir.iterdir() if self.voices_dir.exists() else []):
+        for sub in sorted(self.voices_dir.iterdir()):
             if not sub.is_dir() or sub.name.startswith("_") or sub.name.startswith("."):
                 continue
             pths = list(sub.glob("*.pth"))
@@ -69,49 +109,8 @@ class VoiceChanger:
             })
         return out
 
-    # ─── Model lifecycle ───────────────────────────────────────────────────
-    def _ensure_engine(self):
-        """Lazy-load rvc-python so the app starts fast even without RVC deps."""
-        if self._rvc is not None:
-            return
-        with self._lock:
-            if self._rvc is not None:
-                return
-            try:
-                from rvc_python.infer import RVCInference
-            except Exception as e:
-                self._init_error = (
-                    f"rvc-python introuvable ({e}). Installe-le avec : "
-                    "pip install rvc-python (et torch si pas déjà fait)."
-                )
-                raise RuntimeError(self._init_error) from e
-            try:
-                t0 = time.monotonic()
-                # The constructor auto-downloads HuBERT/RMVPE the first time
-                # — this can take a few minutes on a slow connection.
-                self._rvc = RVCInference(
-                    models_dir=str(self.voices_dir),
-                    device="cpu:0",
-                )
-                self._init_ts = time.monotonic() - t0
-                self._init_error = None
-            except Exception as e:
-                self._init_error = f"Initialisation RVC échouée: {e}"
-                raise
-
-    def _load(self, voice_name: str):
-        self._ensure_engine()
-        if self._current_model == voice_name:
-            return
-        # set_models_dir to pick up any voices added since last call
-        self._rvc.set_models_dir(str(self.voices_dir))
-        self._rvc.load_model(voice_name)
-        self._current_model = voice_name
-
     # ─── Voice file management ─────────────────────────────────────────────
-    def import_voice(self, name: str, pth_src: Path,
-                     index_src: Path | None = None) -> tuple[bool, Optional[str]]:
-        """Copy a .pth (+ optional .index) into a new voice subdir."""
+    def import_voice(self, name: str, pth_src, index_src=None) -> tuple[bool, Optional[str]]:
         safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
         if not safe:
             return False, "Nom invalide"
@@ -132,13 +131,133 @@ class VoiceChanger:
         target = self.voices_dir / name
         if not target.is_dir():
             return False
-        # Don't blow away anything outside the voices dir even if `name` had ..
-        if self.voices_dir.resolve() not in target.resolve().parents:
-            return False
-        if self._current_model == name:
-            self._current_model = None
+        try:
+            target.resolve().relative_to(self.voices_dir.resolve())
+        except ValueError:
+            return False  # path traversal guard
+        if self._current == name:
+            self._unload_current()
         shutil.rmtree(target, ignore_errors=True)
         return True
+
+    # ─── Base asset download ───────────────────────────────────────────────
+    def _ensure_rmvpe(self):
+        """Download rmvpe.pt into the base dir if it's not there yet."""
+        dest = self.base_dir / "rmvpe.pt"
+        if dest.exists() and dest.stat().st_size > 100_000_000:
+            return dest
+        try:
+            import requests
+        except Exception as e:
+            raise RuntimeError(
+                "`requests` introuvable — installe les deps RVC : "
+                "pip install -r requirements-rvc.txt"
+            ) from e
+        tmp = dest.with_suffix(".pt.part")
+        try:
+            with requests.get(RMVPE_URL, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(tmp, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 512):
+                        f.write(chunk)
+            tmp.replace(dest)
+        except Exception as e:
+            try: tmp.unlink()
+            except Exception: pass
+            raise RuntimeError(f"Téléchargement rmvpe.pt échoué: {e}") from e
+        return dest
+
+    # ─── Engine / model lifecycle ──────────────────────────────────────────
+    def _unload_current(self):
+        self._net_g = None
+        self._pipeline = None
+        self._current = None
+        self._cpt = None
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+    def _load_voice(self, voice_name: str):
+        """Load the user .pth + bring up the matching synthesizer."""
+        if self._current == voice_name and self._net_g is not None:
+            return
+
+        info = next((v for v in self.list_voices() if v["name"] == voice_name), None)
+        if info is None:
+            raise RuntimeError(f"Voix introuvable: {voice_name}")
+        pth_path = self.voices_dir / voice_name / info["pth"]
+
+        try:
+            import torch
+        except Exception as e:
+            raise RuntimeError(
+                "PyTorch n'est pas installé — lance : "
+                "pip install -r requirements-rvc.txt"
+            ) from e
+        try:
+            from rvc_lib.models import (
+                SynthesizerTrnMs768NSFsid,
+                SynthesizerTrnMs768NSFsid_nono,
+            )
+        except Exception as e:
+            raise RuntimeError(f"rvc_lib import failed: {e}") from e
+
+        cpt = torch.load(str(pth_path), map_location="cpu", weights_only=False)
+        version = cpt.get("version", "v1")
+        if version != "v2":
+            raise RuntimeError(
+                f"Voix '{voice_name}' est un modèle v{version[1:]}. Seuls les "
+                "modèles RVC v2 sont supportés ici — le backend fairseq-free "
+                "n'a pas le projecteur 'final_proj' des v1. Réentraîne ou "
+                "convertis le modèle en v2."
+            )
+        if_f0 = cpt.get("f0", 1)
+        tgt_sr = cpt["config"][-1]
+        cpt["config"][-3] = cpt["weight"]["emb_g.weight"].shape[0]  # n_spk
+
+        Cls = SynthesizerTrnMs768NSFsid if if_f0 == 1 else SynthesizerTrnMs768NSFsid_nono
+        net_g = Cls(*cpt["config"], is_half=False)
+        # The posterior encoder isn't used at inference time and weighs a few
+        # hundred MB of state we don't need to keep around.
+        try: del net_g.enc_q
+        except Exception: pass
+        net_g.load_state_dict(cpt["weight"], strict=False)
+        net_g.eval()
+
+        self._net_g = net_g
+        self._tgt_sr = tgt_sr
+        self._if_f0 = if_f0
+        self._version = version
+        self._cpt = cpt
+        self._current = voice_name
+        self._build_pipeline()
+
+    def _build_pipeline(self):
+        from rvc_lib.pipeline import Pipeline
+        cfg = _Config(device="cpu", is_half=False)
+        # Pipeline.__init__ takes lib_dir to locate rmvpe.pt — we use the
+        # base dir's parent so `<base_dir>/base_model/rmvpe.pt` resolves.
+        # Simplest: stage the file under the layout Pipeline expects.
+        bm = self.base_dir / "base_model"
+        bm.mkdir(parents=True, exist_ok=True)
+        rmvpe = self._ensure_rmvpe()
+        rmvpe_link = bm / "rmvpe.pt"
+        if not rmvpe_link.exists():
+            try: rmvpe_link.symlink_to(rmvpe)
+            except Exception:
+                shutil.copy2(rmvpe, rmvpe_link)
+        self._pipeline = Pipeline(self._tgt_sr, cfg, lib_dir=str(self.base_dir))
+
+    def _ensure_hubert(self):
+        if self._hubert is not None:
+            return
+        from rvc_lib.hubert_adapter import HubertContentExtractor
+        self._hubert = HubertContentExtractor(
+            device="cpu", half=False, cache_dir=str(self.hf_cache_dir),
+        )
 
     # ─── Inference ─────────────────────────────────────────────────────────
     def convert_file(
@@ -154,21 +273,69 @@ class VoiceChanger:
         rms_mix_rate: float = 0.25,
         filter_radius: int = 3,
     ) -> tuple[bool, Optional[str]]:
-        """Convert `input_path` to `voice_name`, write WAV to `output_path`.
-        Blocks for the duration of inference — caller is expected to be in a
-        worker thread or background job."""
+        """Run RVC inference on `input_path` → `output_path` (.wav). Blocks
+        the caller for the duration — meant to be invoked from a worker."""
         with self._lock:
             try:
-                self._load(voice_name)
-                self._rvc.set_params(
-                    f0up_key=int(f0_up_key),
-                    f0method=str(f0_method),
-                    index_rate=float(index_rate),
-                    protect=float(protect),
-                    rms_mix_rate=float(rms_mix_rate),
-                    filter_radius=int(filter_radius),
-                )
-                self._rvc.infer_file(str(input_path), str(output_path))
-                return True, None
+                self._load_voice(voice_name)
+                self._ensure_hubert()
             except Exception as e:
+                self._init_error = str(e)
                 return False, str(e)
+
+            try:
+                import numpy as np
+                import librosa
+                import soundfile as sf
+            except Exception as e:
+                return False, (
+                    f"Dépendance manquante ({e}). Installe : "
+                    "pip install -r requirements-rvc.txt"
+                )
+
+            # 1. Load + downsample to 16 kHz mono for HuBERT.
+            try:
+                audio_16k, _ = librosa.load(str(input_path), sr=16000, mono=True)
+            except Exception as e:
+                return False, f"Lecture audio échouée: {e}"
+            peak = float(np.abs(audio_16k).max() or 1.0)
+            if peak > 1.0 / 0.95:
+                audio_16k = audio_16k / (peak * 0.95)
+
+            # 2. Find the .index file if one came with this voice.
+            idx_dir = self.voices_dir / voice_name
+            idx_files = list(idx_dir.glob("*.index"))
+            file_index = str(idx_files[0]) if idx_files else ""
+
+            # 3. Run the vendored pipeline.
+            try:
+                audio_opt = self._pipeline.pipeline(
+                    self._hubert,            # mimics fairseq HubertModel
+                    self._net_g,             # synthesizer
+                    0,                       # speaker id (single-speaker)
+                    audio_16k,
+                    str(input_path),
+                    [0, 0, 0],               # times accumulator (unused)
+                    int(f0_up_key),
+                    str(f0_method),
+                    file_index,
+                    float(index_rate),
+                    self._if_f0,
+                    int(filter_radius),
+                    self._tgt_sr,
+                    0,                       # resample_sr — keep target
+                    float(rms_mix_rate),
+                    self._version,
+                    float(protect),
+                    None,                    # f0_file — none
+                )
+            except Exception as e:
+                import traceback
+                return False, f"Pipeline RVC: {e}\n{traceback.format_exc()[-600:]}"
+
+            try:
+                out_arr = np.asarray(audio_opt, dtype=np.int16) if audio_opt.dtype != np.int16 else audio_opt
+                sf.write(str(output_path), out_arr, self._tgt_sr, subtype="PCM_16")
+            except Exception as e:
+                return False, f"Sauvegarde WAV échouée: {e}"
+        return True, None
