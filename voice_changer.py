@@ -171,13 +171,15 @@ class VoiceChanger:
 
     def set_device_pref(self, pref: str):
         """Change preferred device. Forces a reload of the loaded voice next
-        time `_load_voice()` is called."""
+        time `_load_voice()` is called. Holds self._lock so a worker thread
+        mid-inference can't see a half-zeroed state (net_g None while the
+        old pipeline still hands out tensors)."""
         if pref == self._device_pref:
             return
-        self._device_pref = pref
-        self._device, self._device_label = _detect_device(pref)
-        # Force a reload — the loaded synth lives on the old device.
-        self._unload_current()
+        with self._lock:
+            self._device_pref = pref
+            self._device, self._device_label = _detect_device(pref)
+            self._unload_current()
 
     # ─── Status / introspection ────────────────────────────────────────────
     def status(self) -> dict:
@@ -275,10 +277,14 @@ class VoiceChanger:
 
     # ─── Engine / model lifecycle ──────────────────────────────────────────
     def _unload_current(self):
+        # Drop HuBERT alongside the synthesizer — otherwise a device change
+        # leaves it on the old backend and the next inference crashes with
+        # 'weight type (privateuseoneFloatType)' vs 'Input type (FloatTensor)'.
         self._net_g = None
         self._pipeline = None
         self._current = None
         self._cpt = None
+        self._hubert = None
         try:
             import torch
             if torch.cuda.is_available():
@@ -288,7 +294,14 @@ class VoiceChanger:
 
     def _load_voice(self, voice_name: str):
         """Load the user .pth + bring up the matching synthesizer."""
-        if self._current == voice_name and self._net_g is not None:
+        # Early-return only if the SAME voice is already loaded on the SAME
+        # device — otherwise we'd skip a needed reload after a device change.
+        if (
+            self._current == voice_name
+            and self._net_g is not None
+            and self._pipeline is not None
+            and getattr(self._pipeline, "device", None) == self._device
+        ):
             return
 
         info = next((v for v in self.list_voices() if v["name"] == voice_name), None)
@@ -306,13 +319,18 @@ class VoiceChanger:
             ) from e
         # PyTorch CPU defaults to 1 thread on Windows, which leaves a Ryzen
         # 9700X mostly idle during RVC inference. Bump to all physical cores
-        # the first time we load a voice. `set_num_interop_threads` errors
-        # if any tensor op has already happened, hence the one-shot guard.
+        # every load — set_num_threads is safe to re-set, so users toggling
+        # GPU→CPU still get the boost even when the first load happened on
+        # DirectML. set_num_interop_threads can only be set BEFORE any tensor
+        # op has run; guard it once and don't worry if it fails later.
+        try:
+            n = os.cpu_count() or 8
+            torch.set_num_threads(max(1, n // 2))
+        except Exception:
+            pass
         if not self._threads_tuned:
             try:
-                n = os.cpu_count() or 8
-                torch.set_num_threads(max(1, n // 2))
-                torch.set_num_interop_threads(max(1, n // 4))
+                torch.set_num_interop_threads(max(1, (os.cpu_count() or 8) // 4))
             except Exception:
                 pass
             self._threads_tuned = True
@@ -350,13 +368,16 @@ class VoiceChanger:
             net_g = net_g.to(self._device)
         except Exception as e:
             # DirectML can refuse certain ops; fall back to CPU rather than
-            # blowing up the whole load. Also drop any HuBERT we'd loaded on
-            # the now-abandoned device so it gets recreated on CPU below.
+            # blowing up the whole load. Drop any HuBERT we'd loaded on the
+            # now-abandoned device, and sync device_pref to "cpu" so the
+            # set_device_pref early-return doesn't trap the user — they
+            # need to be able to pick another DML adapter to retry.
             self._init_error = (
                 f"Move synthesizer to {self._device_label} failed "
                 f"({e}) — using CPU."
             )
             self._device, self._device_label = "cpu", "CPU"
+            self._device_pref = "cpu"
             self._hubert = None
             net_g = net_g.to("cpu")
 
@@ -392,10 +413,24 @@ class VoiceChanger:
             self._hubert = HubertContentExtractor(
                 device=self._device, half=False, cache_dir=str(self.hf_cache_dir),
             )
-        except Exception as e:
-            # If HuBERT chokes on DirectML (some ops aren't supported), pin
-            # it back to CPU. It's only ~360 MB and 12 transformer layers —
-            # CPU inference of the encoder alone usually stays fast enough.
+        except Exception:
+            # HuBERT choked on DirectML (some ops aren't supported on
+            # privateuseone). Pull EVERYTHING back to CPU rather than leaving
+            # one half of the graph on DML — otherwise the synth/HuBERT
+            # device split crashes in extract_features on the first chunk.
+            self._device, self._device_label = "cpu", "CPU"
+            self._init_error = (
+                "HuBERT n'a pas pu démarrer sur DirectML — bascule de tout "
+                "le pipeline sur CPU (ton GPU AMD a probablement un op non "
+                "supporté par DirectML pour ce modèle)."
+            )
+            # Synth and Pipeline were built on the old device — rebuild now.
+            if self._net_g is not None:
+                try: self._net_g = self._net_g.to("cpu")
+                except Exception: pass
+            # Force the Pipeline to be re-created with the new device on the
+            # next streaming call.
+            self._pipeline = None
             self._hubert = HubertContentExtractor(
                 device="cpu", half=False, cache_dir=str(self.hf_cache_dir),
             )

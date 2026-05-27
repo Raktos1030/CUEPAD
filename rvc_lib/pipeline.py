@@ -124,7 +124,12 @@ class Pipeline(object):
             model = "full"
             # Pick a batch size that doesn't cause memory errors on your gpu
             batch_size = 512
-            # Compute pitch using first gpu
+            # torchcrepe + torch_directml hits a 'torch.device vs int'
+            # comparison inside torch_directml's device shim; pin pitch
+            # extraction to CPU for DML devices. CPU crepe is fast enough.
+            crepe_device = (
+                "cpu" if "privateuseone" in str(self.device) else self.device
+            )
             audio = torch.tensor(np.copy(x))[None].float()
             f0, pd = torchcrepe.predict(
                 audio,
@@ -134,7 +139,7 @@ class Pipeline(object):
                 f0_max,
                 model,
                 batch_size=batch_size,
-                device=self.device,
+                device=crepe_device,
                 return_periodicity=True,
             )
             pd = torchcrepe.filter.median(pd, 3)
@@ -149,17 +154,19 @@ class Pipeline(object):
                     "Loading rmvpe model - base_models/rmvpe.pth"
                 )
                 rmvpe_path = Path(self.lib_dir) / "base_model" / "rmvpe.pt"
+                # RMVPE upstream forces the onnxruntime + .onnx path when
+                # device contains 'privateuseone' — we don't ship either, so
+                # run RMVPE on CPU and let everything else stay on DML. The
+                # F0 detector is small enough that CPU isn't a bottleneck.
+                rmvpe_device = (
+                    "cpu" if "privateuseone" in str(self.device) else self.device
+                )
                 self.model_rmvpe = RMVPE(
                     rmvpe_path,
-                    is_half=self.is_half,
-                    device=self.device,
+                    is_half=False,  # half precision on RMVPE breaks on DML / CPU
+                    device=rmvpe_device,
                 )
             f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
-
-            if "privateuseone" in str(self.device):  # clean ortruntime memory
-                del self.model_rmvpe.model
-                del self.model_rmvpe
-                logger.info("Cleaning ortruntime memory")
 
         f0 *= pow(2, f0_up_key / 12)
         # with open("test.txt","w")as f:f.write("\n".join([str(i)for i in f0.tolist()]))

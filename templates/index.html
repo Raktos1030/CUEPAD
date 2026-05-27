@@ -3219,6 +3219,13 @@
     }
 
     $('#vc-device-pref').addEventListener('change', async () => {
+      // Switching the inference device tears down the loaded synthesizer
+      // and HuBERT. If the live session keeps running across that swap,
+      // the worker thread sees a half-zeroed state and crashes. Stop the
+      // live cleanly first.
+      if (typeof liveRvcState !== 'undefined' && liveRvcState.running) {
+        try { await stopLiveRvc(); } catch {}
+      }
       await saveSetting('voice_ai_device_pref', $('#vc-device-pref').value);
       refreshVoiceAi();
     });
@@ -3495,11 +3502,18 @@
       } catch {}
     }
 
-    // Persist the I/O picks the moment they change.
+    // Persist the I/O picks the moment they change. Beware of device id 0
+    // — sounddevice indices start at 0, so `0 || null === null` would drop
+    // valid picks on Linux/macOS or anywhere the default mic happens to be
+    // index 0. Use Number.isFinite instead of falsy coercion.
+    function _deviceIdFrom(sel) {
+      const v = parseInt(sel.value, 10);
+      return Number.isFinite(v) ? v : null;
+    }
     $('#vc-live-input').addEventListener('change',
-      () => saveSetting('live_rvc_input',  parseInt($('#vc-live-input').value, 10) || null));
+      () => saveSetting('live_rvc_input',  _deviceIdFrom($('#vc-live-input'))));
     $('#vc-live-output').addEventListener('change',
-      () => saveSetting('live_rvc_output', parseInt($('#vc-live-output').value, 10) || null));
+      () => saveSetting('live_rvc_output', _deviceIdFrom($('#vc-live-output'))));
 
     function refreshLiveRvcVoices() {
       // Reuse the voice list rendered by refreshVoiceAi().

@@ -79,6 +79,14 @@ class HubertContentExtractor:
         `hidden_states` ends up indexed (states[N] = output after N encoder
         blocks; states[0] is the conv-feature projection).
         """
+        # Defensive: HuBERT and the rest of the pipeline can land on different
+        # devices (CPU fallback while synth on DirectML, etc). Reconcile by
+        # moving the tensor to whichever device the model itself sits on.
+        model_device = next(self.model.parameters()).device
+        if source.device != model_device:
+            source = source.to(model_device)
+        if padding_mask is not None and padding_mask.device != model_device:
+            padding_mask = padding_mask.to(model_device)
         if source.dtype != self.model.dtype:
             source = source.to(self.model.dtype)
         # attention_mask: 1 = keep, 0 = ignore. We get padding_mask in the

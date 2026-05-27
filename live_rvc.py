@@ -261,10 +261,15 @@ class LiveRvcEngine:
                     mono_in = resample_poly(mono_in, in_resamp_num, in_resamp_den).astype(np.float32)
                 engine._in_ring.write(mono_in)
 
-                want = frames
-                if duplex_sr != tgt_sr:
-                    # need (frames * tgt_sr / duplex_sr) raw samples
-                    want = int(np.ceil(frames * tgt_sr / duplex_sr)) + 4
+                # Consume exactly the number of tgt_sr samples needed to
+                # produce `frames` duplex samples. The previous code added
+                # a +4 slack which leaked ~5 tgt_sr samples per callback
+                # into discard land, draining the out-ring faster than the
+                # worker could fill it (audible underruns after ~1 minute).
+                if duplex_sr == tgt_sr:
+                    want = frames
+                else:
+                    want = int(np.ceil(frames * tgt_sr / duplex_sr))
                 out_block = engine._out_ring.read(want)
                 if out_block is None:
                     outdata.fill(0)
