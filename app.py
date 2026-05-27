@@ -21,6 +21,14 @@ else:
 
 app = Flask(__name__, template_folder=str(_template_dir))
 
+# Werkzeug logs every HTTP request at INFO level — the frontend polls
+# /effects/live/status + /voice-ai/live/status every ~1s, so the terminal
+# floods with 200-OK lines and the actual print() messages from the
+# voice changer (`[VC] ...`) get buried. Bump werkzeug to ERROR so only
+# real failures (500s, tracebacks) surface; keep our own prints intact.
+import logging as _logging
+_logging.getLogger("werkzeug").setLevel(_logging.ERROR)
+
 # Services bag — wired in main.py via configure()
 services: dict = {}
 
