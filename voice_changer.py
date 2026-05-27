@@ -497,6 +497,9 @@ class VoiceChanger:
     def streaming_target_sr(self) -> int | None:
         return self._tgt_sr
 
+    last_chunk_error: Optional[str] = None
+    last_chunk_peak: float = 0.0
+
     def process_chunk(
         self,
         audio_16k,  # 1D float32 numpy array, mono at 16 kHz
@@ -510,17 +513,13 @@ class VoiceChanger:
     ):
         """Run a single Pipeline pass on `audio_16k`. Returns the output at
         the voice's target SR as a float32 numpy array (normalised to [-1,1])
-        — or None if the model isn't loaded yet.
-
-        Caller is responsible for chunk windowing / crossfading so the
-        boundaries don't click. We don't lock here because the live worker
-        thread holds the only reference and the model state is read-only
-        during inference.
+        — or None if the model isn't loaded yet. Records the last error /
+        output peak on the instance so the live engine can surface them to
+        the UI.
         """
         if self._pipeline is None or self._net_g is None or self._hubert is None:
             return None
         import numpy as np
-        # Pipeline.pipeline returns int16 — convert back to float for mixing.
         idx_dir = self.voices_dir / (self._current or "")
         idx_files = list(idx_dir.glob("*.index")) if idx_dir.exists() else []
         file_index = str(idx_files[0]) if idx_files else ""
@@ -530,7 +529,7 @@ class VoiceChanger:
                 self._net_g,
                 0,
                 audio_16k,
-                "live_chunk",   # dummy path — only used for logging
+                "live_chunk",
                 [0, 0, 0],
                 int(f0_up_key),
                 str(f0_method),
@@ -545,6 +544,28 @@ class VoiceChanger:
                 float(protect),
                 None,
             )
-        except Exception:
+        except Exception as e:
+            import traceback
+            self.last_chunk_error = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-400:]}"
             return None
-        return audio_opt.astype(np.float32) / 32768.0
+
+        out = audio_opt.astype(np.float32) / 32768.0
+        # NaN/Inf can leak from DirectML on unsupported ops — clamp + record
+        # the peak so the UI can show "silent / NaN" instead of just nothing.
+        if not np.all(np.isfinite(out)):
+            self.last_chunk_error = (
+                f"sortie non finie ({int((~np.isfinite(out)).sum())} NaN/Inf samples) "
+                f"sur {self._device_label} — l'op a probablement échoué silencieusement"
+            )
+            out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+        self.last_chunk_peak = float(np.abs(out).max()) if out.size else 0.0
+        if self.last_chunk_peak < 1e-4:
+            # All-zero output is the DirectML "silent failure" symptom.
+            self.last_chunk_error = (
+                f"sortie silencieuse (peak={self.last_chunk_peak:.5f}) "
+                f"sur {self._device_label} — probablement un op non-supporté. "
+                "Bascule en CPU dans Accélération pour diagnostiquer."
+            )
+        else:
+            self.last_chunk_error = None
+        return out
