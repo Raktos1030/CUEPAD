@@ -456,12 +456,12 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # Export the synth once per voice + cache on disk. v7 bumps the
-        # cache key for static-FP16 with op_block_list=['Cast'] — same
-        # path that successfully FP16'd the contentvec. v6 ran through
-        # auto_convert which was so conservative (rtol=1e-2) that very
-        # few ops actually flipped to FP16 and synth stayed ~700 ms.
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v7.onnx"
+        # v8 bumps for NSF (m_source) node_block_list — v7's op_block=['Cast']
+        # alone wasn't enough, the NSF source generator's Resize op has no
+        # FP16 implementation in ORT, model failed to load and fell back to
+        # FP32. Adding the whole NSF subgraph to node_block_list keeps it in
+        # FP32 while the rest (encoder, flow, decoder) goes FP16.
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v8.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.

@@ -99,17 +99,32 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
 def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     """Synth-specific wrapper around the generic mixed-precision pass.
 
-    Routes through the static converter with op_block_list=['Cast'] —
-    same path that finally worked for contentvec. The auto path's
-    rtol=1e-2 bisection is conservative on this graph (synth came out
-    at ~600-700 ms with very few ops actually flipped to FP16); the
-    static path converts everything except Cast unconditionally, which
-    on RDNA3 with packed-FP16 math should bring the synth into the
-    300-500 ms range. Cast nodes stay FP32 because the synth's NSF
-    source generator and the encoder's attention scaling rely on them
-    keeping their original type (every previous attempt to convert
-    those Casts broke the model at ORT load)."""
+    Routes through the static converter with two blocks:
+     - op_block_list=['Cast'] so HuBERT-style attention scaling Casts
+       and any other explicit Cast stay FP32.
+     - node_block_list = every node whose name contains 'm_source' so
+       the NSF source generator stays entirely FP32. The NSF uses
+       Resize ops on Constant FP32 sine tables; the Resize op family
+       has no FP16 implementation in ORT, and any conversion that
+       leaves its input/output mismatched fails to load.
+
+    Everything else (encoder, flow, decoder HiFi-GAN-style upsampling
+    convolutions — the bulk of the compute) gets FP16 unconditionally.
+    Smoke-tested in the helper; falls back to FP32 if ORT still
+    rejects."""
     import numpy as _np
+    try:
+        import onnx as _onnx
+    except ImportError:
+        # No onnx → can't compute the NSF node list. The helper will
+        # itself fall back to FP32 when its own onnx import fails.
+        nsf_nodes = []
+    else:
+        nsf_nodes = [
+            n.name for n in _onnx.load(fp32_path).graph.node
+            if 'm_source' in n.name
+        ]
+
     T = 64
     feed = {
         'phone':         _np.random.randn(1, T, 768).astype(_np.float32),
@@ -122,20 +137,22 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     _try_fp16_then_fp32_with_feed(
         src_fp32=fp32_path, dst=final_path, feed=feed, label="synth",
         op_block_list=["Cast"],
+        node_block_list=nsf_nodes,
     )
 
 
 def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
                                   feed: dict, label: str,
-                                  op_block_list: list | None = None) -> None:
+                                  op_block_list: list | None = None,
+                                  node_block_list: list | None = None) -> None:
     """Best-effort mixed-precision conversion with FP32 fallback.
 
     Two paths:
-     - If `op_block_list` is given, delegate to the static converter
-       (`convert_float_to_float16`) which accepts op-type blocklists.
-       Used for graphs where we know specific op types break the
-       auto path (e.g. ['Cast'] for HuBERT's attention which has
-       explicit casts for softmax scaling).
+     - If `op_block_list` or `node_block_list` is given, delegate to the
+       static converter (`convert_float_to_float16`) which accepts both.
+       Used for graphs where we know specific op types or subgraphs
+       break the auto path (Cast for HuBERT attention, the entire
+       'm_source' NSF subgraph for the synth).
      - Otherwise use `auto_convert_mixed_precision`: runs the model in
        FP32 first to capture a reference output, then iteratively tries
        to convert subsets of nodes to FP16, accepting only subsets
@@ -144,8 +161,13 @@ def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
     Both paths share the FP32 fallback: any failure → simplified FP32
     graph is saved unchanged so live inference still works.
     """
-    if op_block_list:
-        _try_static_fp16_then_fp32(src_fp32, dst, list(op_block_list), label)
+    if op_block_list or node_block_list:
+        _try_static_fp16_then_fp32(
+            src_fp32, dst,
+            op_block_list=list(op_block_list or []),
+            node_block_list=list(node_block_list or []),
+            label=label,
+        )
         return
 
     import shutil
@@ -189,12 +211,14 @@ def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
 
 
 def _try_static_fp16_then_fp32(src_fp32: str, dst: str,
-                               op_block_list: list, label: str) -> None:
+                               op_block_list: list, label: str,
+                               node_block_list: list | None = None) -> None:
     """Static FP16 conversion using `convert_float_to_float16` with
-    op-type blocklist + smoke-test gate. Used when the auto path's API
-    can't express what we need (no op_block_list parameter) or when a
-    known-bad op family needs to be excluded from the start (HuBERT's
-    Cast nodes). On any failure → simplified FP32 fallback."""
+    op-type + node-name blocklists + smoke-test gate. Used when the
+    auto path's API can't express what we need (no op_block_list
+    parameter) or when known-bad op families / subgraphs need to be
+    excluded from the start (HuBERT's Cast nodes, the synth's NSF
+    source generator). On any failure → simplified FP32 fallback."""
     import os, shutil
     try:
         import onnx as _onnx
@@ -208,12 +232,15 @@ def _try_static_fp16_then_fp32(src_fp32: str, dst: str,
 
     try:
         model_proto = _onnx.load(src_fp32)
-        print(f"[VC] {label} static-FP16 (op_block={op_block_list})…",
-              flush=True)
+        node_count = len(node_block_list or [])
+        node_hint = f", {node_count} nodes" if node_count else ""
+        print(f"[VC] {label} static-FP16 (op_block={op_block_list}"
+              f"{node_hint})…", flush=True)
         converted = ocnn_fp16.convert_float_to_float16(
             model_proto,
             keep_io_types=True,
             op_block_list=op_block_list,
+            node_block_list=node_block_list or [],
             max_finite_val=65504.0,
             disable_shape_infer=False,
         )
