@@ -169,6 +169,13 @@ class VoiceChanger:
         self._device_pref = device_pref
         self._device, self._device_label = _detect_device(device_pref)
 
+        # ONNX path (DirectML / CUDA via onnxruntime). Built lazily on first
+        # `prepare_for_streaming` when the chosen device is GPU.
+        self._onnx_session = None  # OnnxRvcSession when in use, else None
+        # ONNX path runs pitch detection on CPU so RMVPE doesn't crash on
+        # DirectML — keep a cached CPU RMVPE alive across chunks.
+        self._rmvpe_cpu = None
+
     def set_device_pref(self, pref: str):
         """Change preferred device. Forces a reload of the loaded voice next
         time `_load_voice()` is called. Holds self._lock so a worker thread
@@ -285,12 +292,21 @@ class VoiceChanger:
         self._current = None
         self._cpt = None
         self._hubert = None
+        self._onnx_session = None
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
             pass
+
+    def _is_onnx_backend(self) -> bool:
+        """Use the ONNX/onnxruntime path when the user picked DirectML —
+        torch+DirectML segfaults the synth (weight_norm + LayerNorm ops
+        misbehave). CUDA stays on torch (works natively). CPU stays on
+        torch (no benefit to ONNX-on-CPU)."""
+        d = (self._device or "").lower()
+        return d.startswith("privateuseone")
 
     def _load_voice(self, voice_name: str):
         """Load the user .pth + bring up the matching synthesizer."""
@@ -355,6 +371,22 @@ class VoiceChanger:
         tgt_sr = cpt["config"][-1]
         cpt["config"][-3] = cpt["weight"]["emb_g.weight"].shape[0]  # n_spk
 
+        # ─── ONNX/DirectML branch ─────────────────────────────────────────
+        if self._is_onnx_backend():
+            try:
+                self._load_onnx_path(voice_name, pth_path, cpt, if_f0, tgt_sr, version)
+                return
+            except Exception as e:
+                # ONNX path failed (missing onnxruntime, export failure,
+                # whatever) — surface it and fall back to torch on CPU
+                # rather than leaving the user with a broken setup.
+                self._init_error = (
+                    f"ONNX/DirectML init échoué ({e}). Bascule en CPU. "
+                    "Si tu veux du GPU, vérifie `pip show onnxruntime-directml`."
+                )
+                self._device, self._device_label = "cpu", "CPU"
+                self._device_pref = "cpu"
+
         Cls = SynthesizerTrnMs768NSFsid if if_f0 == 1 else SynthesizerTrnMs768NSFsid_nono
         net_g = Cls(*cpt["config"], is_half=False)
         # The posterior encoder isn't used at inference time and weighs a few
@@ -403,6 +435,51 @@ class VoiceChanger:
         self._cpt = cpt
         self._current = voice_name
         self._build_pipeline()
+
+    # ─── ONNX/DirectML inference path ──────────────────────────────────────
+    def _load_onnx_path(self, voice_name: str, pth_path: Path, cpt,
+                        if_f0: int, tgt_sr: int, version: str):
+        from rvc_lib.onnx_engine import (
+            export_synth_to_onnx, download_contentvec_onnx,
+            OnnxRvcSession, _providers_for,
+        )
+        # Export the synth once per voice + cache on disk.
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v2.onnx"
+        if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
+            export_synth_to_onnx(pth_path, onnx_synth)
+        # ContentVec ONNX is shared across voices — keep one copy in _base.
+        cvec_onnx = self.base_dir / "vec-768-layer-12.onnx"
+        if not cvec_onnx.exists() or cvec_onnx.stat().st_size < 100_000_000:
+            download_contentvec_onnx(cvec_onnx)
+
+        providers = _providers_for(self._device_label)
+        dml_idx = None
+        if self._device.startswith("privateuseone:"):
+            try: dml_idx = int(self._device.split(":", 1)[1])
+            except (ValueError, IndexError): dml_idx = 0
+
+        self._onnx_session = OnnxRvcSession(
+            synth_onnx=onnx_synth, contentvec_onnx=cvec_onnx,
+            providers=providers, dml_device_index=dml_idx,
+        )
+        # Confirm DML actually engaged — if onnxruntime fell back to CPU,
+        # the user wants to know rather than silently get CPU perf.
+        if self._device.startswith("privateuseone") and \
+           "DmlExecutionProvider" not in self._onnx_session.active_providers:
+            self._init_error = (
+                "onnxruntime-directml absent ou inactif — installé avec "
+                "`pip install onnxruntime-directml` ? Inférence en CPU."
+            )
+
+        self._tgt_sr = tgt_sr
+        self._if_f0 = if_f0
+        self._version = version
+        self._cpt = cpt
+        self._current = voice_name
+        # Torch side stays None — the ONNX session replaces both net_g and
+        # the Pipeline. Pipeline is for the torch path only.
+        self._net_g = None
+        self._pipeline = None
 
     def _build_pipeline(self):
         from rvc_lib.pipeline import Pipeline
@@ -567,6 +644,12 @@ class VoiceChanger:
         output peak on the instance so the live engine can surface them to
         the UI.
         """
+        # Dispatch to the ONNX session when the user picked DirectML.
+        if self._onnx_session is not None:
+            return self._process_chunk_onnx(
+                audio_16k, f0_up_key=f0_up_key, f0_method=f0_method,
+                index_rate=index_rate, protect=protect,
+            )
         if self._pipeline is None or self._net_g is None or self._hubert is None:
             return None
         import numpy as np
@@ -625,5 +708,129 @@ class VoiceChanger:
             # Either we produced real audio, or the user wasn't talking.
             # Either way, clear any previous error so the UI doesn't keep
             # showing a stale message.
+            self.last_chunk_error = None
+        return out
+
+    # ─── ONNX/DirectML chunk inference ─────────────────────────────────────
+    def _ensure_rmvpe_cpu(self):
+        if self._rmvpe_cpu is not None:
+            return self._rmvpe_cpu
+        from rvc_lib.rmvpe import RMVPE
+        rmvpe_pt = self._ensure_rmvpe()
+        bm = self.base_dir / "base_model"
+        bm.mkdir(parents=True, exist_ok=True)
+        link = bm / "rmvpe.pt"
+        if not link.exists():
+            try: link.symlink_to(rmvpe_pt)
+            except Exception: shutil.copy2(rmvpe_pt, link)
+        self._rmvpe_cpu = RMVPE(str(link), is_half=False, device="cpu")
+        return self._rmvpe_cpu
+
+    def _extract_f0_for_onnx(self, audio_16k, target_len: int,
+                             f0_up_key: float, f0_method: str):
+        """Compute (pitch_quantized, pitchf_hz) at frame rate matching the
+        ContentVec ONNX feature stream (one frame per 160 audio samples)."""
+        import numpy as np
+        f0_min, f0_max = 50.0, 1100.0
+        if f0_method == "rmvpe":
+            f0 = self._ensure_rmvpe_cpu().infer_from_audio(audio_16k, thred=0.03)
+        elif f0_method == "harvest":
+            import pyworld
+            f0, _ = pyworld.harvest(audio_16k.astype(np.double), 16000,
+                                    f0_floor=f0_min, f0_ceil=f0_max,
+                                    frame_period=10)
+            f0 = f0.astype(np.float32)
+        elif f0_method == "pm":
+            import parselmouth
+            snd = parselmouth.Sound(audio_16k, 16000)
+            f0 = (snd.to_pitch_ac(time_step=0.01, voicing_threshold=0.6,
+                                  pitch_floor=f0_min, pitch_ceiling=f0_max)
+                     .selected_array["frequency"]).astype(np.float32)
+        else:  # crepe
+            import torch, torchcrepe
+            with torch.no_grad():
+                audio_t = torch.tensor(audio_16k)[None].float()
+                f0_t, pd = torchcrepe.predict(
+                    audio_t, 16000, 160, f0_min, f0_max, "full",
+                    batch_size=512, device="cpu", return_periodicity=True,
+                )
+                pd = torchcrepe.filter.median(pd, 3)
+                f0_t = torchcrepe.filter.mean(f0_t, 3)
+                f0_t[pd < 0.1] = 0
+                f0 = f0_t[0].cpu().numpy().astype(np.float32)
+
+        # User pitch shift.
+        f0 = f0 * (2.0 ** (float(f0_up_key) / 12.0))
+
+        # Resize to target_len (linear interp on non-zero pitch).
+        if f0.shape[0] != target_len:
+            old_x = np.linspace(0.0, 1.0, max(1, f0.shape[0]), dtype=np.float32)
+            new_x = np.linspace(0.0, 1.0, target_len, dtype=np.float32)
+            f0 = np.interp(new_x, old_x, f0).astype(np.float32)
+
+        # Quantize to 1..255 MIDI-like bins for the synth's pitch input.
+        f0_mel_min = 1127.0 * np.log(1.0 + f0_min / 700.0)
+        f0_mel_max = 1127.0 * np.log(1.0 + f0_max / 700.0)
+        f0_mel = 1127.0 * np.log(1.0 + f0 / 700.0)
+        f0_mel = np.where(
+            f0_mel > 0,
+            (f0_mel - f0_mel_min) * 254.0 / (f0_mel_max - f0_mel_min) + 1.0,
+            1.0,
+        )
+        f0_mel = np.clip(f0_mel, 1.0, 255.0)
+        pitch = np.rint(f0_mel).astype(np.int64)
+        return pitch, f0.astype(np.float32)
+
+    def _process_chunk_onnx(self, audio_16k, *, f0_up_key, f0_method,
+                            index_rate, protect):
+        import numpy as np
+        sess = self._onnx_session
+        if sess is None:
+            return None
+        try:
+            audio = np.asarray(audio_16k, dtype=np.float32)
+
+            # 1. Content features. ContentVec returns (1, 768, T_h); we
+            #    upsample 2× along time and transpose to (1, T, 768).
+            phone = sess.extract_features(audio)
+            T = phone.shape[1]
+            phone_lengths = np.array([T], dtype=np.int64)
+
+            # 2. Pitch.
+            pitch, pitchf = self._extract_f0_for_onnx(audio, T, f0_up_key, f0_method)
+            pitch  = pitch.reshape(1, -1).astype(np.int64)
+            pitchf = pitchf.reshape(1, -1).astype(np.float32)
+
+            # 3. Speaker id + noise.
+            ds  = np.array([0], dtype=np.int64)
+            rnd = np.random.randn(1, 192, T).astype(np.float32)
+
+            # 4. Run synth.
+            int16 = sess.infer(phone, phone_lengths, pitch, pitchf, ds, rnd)
+            out = int16.squeeze().astype(np.float32) / 32768.0
+        except Exception as e:
+            import traceback
+            self.last_chunk_error = (
+                f"ONNX/DirectML chunk: {type(e).__name__}: {e}\n"
+                f"{traceback.format_exc()[-500:]}"
+            )
+            return None
+
+        if not np.all(np.isfinite(out)):
+            self.last_chunk_error = (
+                f"sortie non finie ({int((~np.isfinite(out)).sum())} NaN/Inf) "
+                f"sur {self._device_label}"
+            )
+            out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+            return out
+
+        self.last_chunk_peak = float(np.abs(out).max()) if out.size else 0.0
+        in_peak = float(np.abs(audio).max()) if audio.size else 0.0
+        if self.last_chunk_peak < 1e-5 and in_peak > 5e-3:
+            self.last_chunk_error = (
+                f"sortie ≈ silence (peak={self.last_chunk_peak:.6f}) malgré "
+                f"un signal d'entrée (peak={in_peak:.3f}) sur {self._device_label}."
+            )
+        else:
             self.last_chunk_error = None
         return out

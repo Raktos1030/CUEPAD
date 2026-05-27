@@ -36,10 +36,11 @@ praat-parselmouth   # 'pm' pitch method
 # your hardware AFTER the base install above:
 #
 #   - AMD GPU on Windows (e.g. RX 7900 XTX/GRE, RX 6000 series):
-#       pip install torch-directml
-#     Auto-detected by the engine. May require pinning torch to a
-#     compatible version — if pip yells, try `pip install torch==2.4.*`
-#     first then `pip install torch-directml`.
+#       pip install torch-directml onnxruntime-directml
+#     torch-directml lets the engine list adapters and select your GPU.
+#     onnxruntime-directml is the actual inference backend — torch+DML
+#     segfaults the RVC synth, ONNX Runtime + DML is rock-solid (same
+#     path w-okada uses on AMD).
 #
 #   - Intel Arc / iGPU on Windows: same as AMD (DirectML).
 #

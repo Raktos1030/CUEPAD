@@ -73,6 +73,8 @@ a = Analysis(
         "rvc_lib.rmvpe",
         "rvc_lib.pipeline",
         "rvc_lib.hubert_adapter",
+        "rvc_lib.models_onnx",
+        "rvc_lib.onnx_engine",
         "pynput",
         "pynput.keyboard",
         "pynput.keyboard._win32",
