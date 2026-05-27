@@ -3247,26 +3247,38 @@
       };
     }
     function applyVoiceParams(p) {
-      // Apply saved params to BOTH the offline and live UIs at once.
-      const setSeg = (sel, value) => $$(`${sel} .seg-btn`).forEach(b => b.classList.toggle('active', b.dataset.value === value));
-      if (p.f0_up_key != null) {
-        $('#vc-pitch').value = p.f0_up_key;
+      // Mirror saved params to BOTH the offline and live UIs. Always apply
+      // a value — if the voice has no saved tuning yet, snap to defaults so
+      // the previous voice's slider position doesn't leak across.
+      p = p || {};
+      const setSeg = (sel, value) =>
+        $$(`${sel} .seg-btn`).forEach(b => b.classList.toggle('active', b.dataset.value === value));
+
+      // Suspend per-voice auto-save while we drive the sliders programmatically
+      // — otherwise the synthetic 'input' event would write the just-applied
+      // value back, racing with the user's next change.
+      window._vcSuppressSave = true;
+      try {
+        const pitch = (p.f0_up_key != null) ? p.f0_up_key : 0;
+        $('#vc-pitch').value = pitch;
         $('#vc-pitch').dispatchEvent(new Event('input'));
-        $('#vc-live-pitch').value = p.f0_up_key;
+        $('#vc-live-pitch').value = pitch;
         $('#vc-live-pitch').dispatchEvent(new Event('input'));
-      }
-      if (p.f0_method) {
-        setSeg('#vc-f0-seg', p.f0_method);
-        setSeg('#vc-live-f0-seg', p.f0_method);
-      }
-      if (p.index_rate != null) {
-        const pct = Math.round(p.index_rate * 100);
-        $('#vc-index').value = pct;     $('#vc-index').dispatchEvent(new Event('input'));
+
+        const f0m = p.f0_method || 'rmvpe';
+        setSeg('#vc-f0-seg',      f0m);
+        setSeg('#vc-live-f0-seg', f0m);
+
+        const idx = (p.index_rate != null) ? p.index_rate : 0.5;
+        const pct = Math.round(idx * 100);
+        $('#vc-index').value = pct;      $('#vc-index').dispatchEvent(new Event('input'));
         $('#vc-live-index').value = pct; $('#vc-live-index').dispatchEvent(new Event('input'));
+      } finally {
+        window._vcSuppressSave = false;
       }
     }
     function scheduleSaveVoiceParams(voice) {
-      if (!voice) return;
+      if (!voice || window._vcSuppressSave) return;
       clearTimeout(vcParamsSaveTimer);
       vcParamsSaveTimer = setTimeout(async () => {
         try {
@@ -3415,29 +3427,48 @@
     function refreshLiveRvcDevices() {
       try {
         return fetch('/devices').then(r => r.json()).then(d => {
-          const fill = (el, list, hint) => {
+          const s = state.settings || {};
+          const fill = (el, list, hint, saved) => {
             if (!el) return;
             el.innerHTML = list.length
               ? list.map(x => {
                   const tag = x.virtual ? ' [VIRTUEL]' : (x.default ? ' [DÉFAUT]' : '');
-                  return `<option value="${x.id}">${escapeHtml(x.name)}${tag}</option>`;
+                  const sel = (saved != null && String(saved) === String(x.id)) ? ' selected' : '';
+                  return `<option value="${x.id}"${sel}>${escapeHtml(x.name)}${tag}</option>`;
                 }).join('')
               : `<option value="">${hint}</option>`;
           };
-          fill($('#vc-live-input'),  d.inputs  || [], 'Aucun micro');
-          fill($('#vc-live-output'), d.outputs || [], 'Aucune sortie');
+          fill($('#vc-live-input'),  d.inputs  || [], 'Aucun micro',   s.live_rvc_input);
+          fill($('#vc-live-output'), d.outputs || [], 'Aucune sortie', s.live_rvc_output);
+          // Restore latency preset (default to medium if unset).
+          const latency = s.live_rvc_latency || 'medium';
+          $$('#vc-live-latency-seg .seg-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.value === latency));
+          liveRvcState.latency = latency;
         });
       } catch {}
     }
 
+    // Persist the I/O picks the moment they change.
+    $('#vc-live-input').addEventListener('change',
+      () => saveSetting('live_rvc_input',  parseInt($('#vc-live-input').value, 10) || null));
+    $('#vc-live-output').addEventListener('change',
+      () => saveSetting('live_rvc_output', parseInt($('#vc-live-output').value, 10) || null));
+
     function refreshLiveRvcVoices() {
       // Reuse the voice list rendered by refreshVoiceAi().
-      const opts = state.sounds; // dummy
       const sel = $('#vc-live-voice');
       const voices = Array.from($('#vc-voice').options || []).map(o => o.value).filter(Boolean);
+      const saved = (state.settings || {}).live_rvc_voice;
       sel.innerHTML = voices.length
-        ? voices.map(v => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join('')
+        ? voices.map(v => {
+            const s = (saved === v) ? ' selected' : '';
+            return `<option value="${escapeAttr(v)}"${s}>${escapeHtml(v)}</option>`;
+          }).join('')
         : `<option value="">Importe une voix d'abord</option>`;
+      // If selection landed somewhere (saved match OR first option), pull
+      // that voice's saved params into both UIs.
+      if (sel.value) loadVoiceParams(sel.value);
     }
 
     // (refreshVoiceAi / renderVoiceList call us back directly — no monkey-patch.)
@@ -3452,7 +3483,7 @@
     }
     function scheduleSaveLiveVoiceParams() {
       const v = $('#vc-live-voice').value;
-      if (!v) return;
+      if (!v || window._vcSuppressSave) return;
       clearTimeout(vcParamsSaveTimer);
       vcParamsSaveTimer = setTimeout(async () => {
         try {
@@ -3463,10 +3494,14 @@
         } catch {}
       }, 250);
     }
-    // Load saved params when the live voice picker changes.
+    // Load saved params when the live voice picker changes, and remember
+    // which voice the user last picked so it comes back on restart.
     $('#vc-live-voice').addEventListener('change', () => {
       const v = $('#vc-live-voice').value;
-      if (v) loadVoiceParams(v);
+      if (v) {
+        loadVoiceParams(v);
+        saveSetting('live_rvc_voice', v);
+      }
     });
 
     // Sliders for live RVC params
@@ -3494,6 +3529,7 @@
       if (!b) return;
       $$('#vc-live-latency-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
       liveRvcState.latency = b.dataset.value;
+      saveSetting('live_rvc_latency', b.dataset.value);
       // Restart needed to apply a new chunk size.
       if (liveRvcState.running) (async () => { await stopLiveRvc(); await startLiveRvc(); })();
     });

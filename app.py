@@ -630,6 +630,10 @@ def settings_set():
         "volume_main", "volume_monitor",
         "monitor_enabled", "monitor_muted",
         "hotkeys_enabled", "library_dir", "active_tab",
+        # Live RVC remembers the user's mic / output / latency choice so
+        # they don't re-pick them on every launch.
+        "live_rvc_input", "live_rvc_output", "live_rvc_latency",
+        "live_rvc_voice",
     }
     patch = {k: v for k, v in data.items() if k in allowed}
     if "hotkeys_enabled" in patch:
