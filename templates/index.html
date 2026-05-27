@@ -1484,6 +1484,20 @@
               <div class="sub" id="vc-status-sub">Le moteur RVC télécharge HuBERT + RMVPE (~540 MB) au premier lancement. Patience.</div>
             </div>
           </div>
+          <div class="settings-row">
+            <div class="label">
+              <div class="ttl">Accélération</div>
+              <div class="sub" id="vc-device-sub">CPU (lent en live — installe torch-directml pour utiliser ton GPU AMD)</div>
+            </div>
+            <div class="control">
+              <select class="select" id="vc-device-pref" style="min-width: 180px;">
+                <option value="auto">AUTO (recommandé)</option>
+                <option value="dml">GPU AMD (DirectML)</option>
+                <option value="cuda">GPU NVIDIA (CUDA)</option>
+                <option value="cpu">CPU uniquement</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <div class="card" style="margin-top: 18px;">
@@ -3175,7 +3189,21 @@
         t.textContent = 'Prêt';
         sub.textContent = `Dossier des voix : ${s.voices_dir}` + (s.current ? ` — voix chargée : ${s.current}` : '');
       }
+      // Device label.
+      if (s.device_label) {
+        const isCpu = s.device === 'cpu';
+        $('#vc-device-sub').textContent = isCpu
+          ? `${s.device_label} — lent en live, OK en offline. Pour ton AMD GPU : pip install torch-directml`
+          : `${s.device_label} — accélération GPU active`;
+      }
+      const sel = $('#vc-device-pref');
+      if (sel && s.device_pref) sel.value = s.device_pref;
     }
+
+    $('#vc-device-pref').addEventListener('change', async () => {
+      await saveSetting('voice_ai_device_pref', $('#vc-device-pref').value);
+      refreshVoiceAi();
+    });
 
     function renderVoiceList(items) {
       $('#vc-voice-count').textContent = items.length;

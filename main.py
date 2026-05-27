@@ -111,7 +111,10 @@ def main():
     live = LiveMicEngine()
     voices_dir = APP_DATA / "voices"
     voices_dir.mkdir(parents=True, exist_ok=True)
-    voice_changer = VoiceChanger(voices_dir=voices_dir)
+    voice_changer = VoiceChanger(
+        voices_dir=voices_dir,
+        device_pref=settings.get("voice_ai_device_pref", "auto"),
+    )
     live_rvc = LiveRvcEngine(voice_changer=voice_changer)
     hotkeys = HotkeyManager()
     hotkeys.set_enabled(bool(settings.get("hotkeys_enabled", True)))

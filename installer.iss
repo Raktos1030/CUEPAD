@@ -1,6 +1,6 @@
 ; Inno Setup 6 — Q-Pad
 #define AppName    "Q-Pad"
-#define AppVersion "2.4.2"
+#define AppVersion "2.5.0"
 #define AppExeName "Q-Pad.exe"
 
 [Setup]

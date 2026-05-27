@@ -634,6 +634,8 @@ def settings_set():
         # they don't re-pick them on every launch.
         "live_rvc_input", "live_rvc_output", "live_rvc_latency",
         "live_rvc_voice",
+        # CPU / DirectML (AMD GPU) / CUDA / auto.
+        "voice_ai_device_pref",
     }
     patch = {k: v for k, v in data.items() if k in allowed}
     if "hotkeys_enabled" in patch:
@@ -651,6 +653,8 @@ def settings_set():
     # play() call.
     if "monitor_enabled" in patch:
         audio.set_monitor_muted(not patch["monitor_enabled"])
+    if "voice_ai_device_pref" in patch:
+        services["voice_changer"].set_device_pref(patch["voice_ai_device_pref"])
     sett.update(patch)
     return jsonify({"ok": True, "settings": sett.all()})
 

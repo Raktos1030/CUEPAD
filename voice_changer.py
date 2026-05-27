@@ -42,23 +42,69 @@ RMVPE_URL    = "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/
 RMVPE_SIZE   = 181 * 1024 * 1024  # ~181 MB, used for the progress UI
 
 
+def _detect_device(preferred: str = "auto") -> tuple[str, str]:
+    """Pick the best PyTorch device for RVC inference.
+
+    Returns (device_string, label) where:
+        device_string is something Pipeline can pass to `.to(...)`,
+        label is a short human-readable tag for the UI / logs.
+
+    Order: CUDA (NVIDIA) > DirectML (AMD/Intel on Windows) > CPU.
+    `preferred` accepts 'auto', 'cpu', 'cuda', 'dml' to force a backend.
+    """
+    if preferred not in (None, "auto"):
+        try:
+            import torch
+        except Exception:
+            return "cpu", "CPU"
+        if preferred == "cpu":
+            return "cpu", "CPU"
+        if preferred == "cuda" and torch.cuda.is_available():
+            return "cuda:0", f"GPU (CUDA: {torch.cuda.get_device_name(0)})"
+        if preferred == "dml":
+            try:
+                import torch_directml  # type: ignore
+                if torch_directml.is_available():
+                    name = torch_directml.device_name(0) if hasattr(torch_directml, "device_name") else "DirectML"
+                    return "privateuseone:0", f"GPU (DirectML: {name})"
+            except Exception:
+                pass
+        return "cpu", "CPU"
+    # auto
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda:0", f"GPU (CUDA: {torch.cuda.get_device_name(0)})"
+    except Exception:
+        pass
+    try:
+        import torch_directml  # type: ignore
+        if torch_directml.is_available():
+            name = (torch_directml.device_name(0)
+                    if hasattr(torch_directml, "device_name") else "DirectML")
+            return "privateuseone:0", f"GPU (DirectML: {name})"
+    except Exception:
+        pass
+    return "cpu", "CPU"
+
+
 class _Config:
     """Minimal stand-in for rvc-python's Config object — Pipeline only reads
     a handful of attributes off this, so we hand-roll just those."""
     def __init__(self, device: str = "cpu", is_half: bool = False):
         self.device  = device
         self.is_half = is_half
-        # Chunk sizes copied from rvc-python's CPU defaults. They drive how
-        # the input audio is windowed during inference — these values keep
-        # peak memory bounded on commodity hardware.
-        self.x_pad    = 1
-        self.x_query  = 6
-        self.x_center = 38
-        self.x_max    = 41
+        # Chunk sizes — for GPU we can afford larger windows (more parallelism
+        # = better throughput); CPU stays conservative to keep RAM bounded.
+        is_gpu = device != "cpu"
+        self.x_pad    = 3  if is_gpu else 1
+        self.x_query  = 10 if is_gpu else 6
+        self.x_center = 60 if is_gpu else 38
+        self.x_max    = 65 if is_gpu else 41
 
 
 class VoiceChanger:
-    def __init__(self, voices_dir: Path):
+    def __init__(self, voices_dir: Path, device_pref: str = "auto"):
         self.voices_dir = Path(voices_dir)
         self.voices_dir.mkdir(parents=True, exist_ok=True)
         self.base_dir = self.voices_dir / "_base"
@@ -78,6 +124,19 @@ class VoiceChanger:
         self._lock = threading.Lock()
         self._threads_tuned = False
 
+        self._device_pref = device_pref
+        self._device, self._device_label = _detect_device(device_pref)
+
+    def set_device_pref(self, pref: str):
+        """Change preferred device. Forces a reload of the loaded voice next
+        time `_load_voice()` is called."""
+        if pref == self._device_pref:
+            return
+        self._device_pref = pref
+        self._device, self._device_label = _detect_device(pref)
+        # Force a reload — the loaded synth lives on the old device.
+        self._unload_current()
+
     # ─── Status / introspection ────────────────────────────────────────────
     def status(self) -> dict:
         return {
@@ -87,6 +146,9 @@ class VoiceChanger:
             "voices_dir":   str(self.voices_dir),
             "voice_count":  len(self.list_voices()),
             "pitch_methods": PITCH_METHODS,
+            "device":       self._device,
+            "device_label": self._device_label,
+            "device_pref":  self._device_pref,
         }
 
     def list_voices(self) -> list[dict]:
@@ -240,6 +302,20 @@ class VoiceChanger:
         except Exception: pass
         net_g.load_state_dict(cpt["weight"], strict=False)
         net_g.eval()
+        # Move the synthesizer to whichever device the user picked.
+        try:
+            net_g = net_g.to(self._device)
+        except Exception as e:
+            # DirectML can refuse certain ops; fall back to CPU rather than
+            # blowing up the whole load. Also drop any HuBERT we'd loaded on
+            # the now-abandoned device so it gets recreated on CPU below.
+            self._init_error = (
+                f"Move synthesizer to {self._device_label} failed "
+                f"({e}) — using CPU."
+            )
+            self._device, self._device_label = "cpu", "CPU"
+            self._hubert = None
+            net_g = net_g.to("cpu")
 
         self._net_g = net_g
         self._tgt_sr = tgt_sr
@@ -251,7 +327,7 @@ class VoiceChanger:
 
     def _build_pipeline(self):
         from rvc_lib.pipeline import Pipeline
-        cfg = _Config(device="cpu", is_half=False)
+        cfg = _Config(device=self._device, is_half=False)
         # Pipeline.__init__ takes lib_dir to locate rmvpe.pt — we use the
         # base dir's parent so `<base_dir>/base_model/rmvpe.pt` resolves.
         # Simplest: stage the file under the layout Pipeline expects.
@@ -269,9 +345,17 @@ class VoiceChanger:
         if self._hubert is not None:
             return
         from rvc_lib.hubert_adapter import HubertContentExtractor
-        self._hubert = HubertContentExtractor(
-            device="cpu", half=False, cache_dir=str(self.hf_cache_dir),
-        )
+        try:
+            self._hubert = HubertContentExtractor(
+                device=self._device, half=False, cache_dir=str(self.hf_cache_dir),
+            )
+        except Exception as e:
+            # If HuBERT chokes on DirectML (some ops aren't supported), pin
+            # it back to CPU. It's only ~360 MB and 12 transformer layers —
+            # CPU inference of the encoder alone usually stays fast enough.
+            self._hubert = HubertContentExtractor(
+                device="cpu", half=False, cache_dir=str(self.hf_cache_dir),
+            )
 
     # ─── Inference ─────────────────────────────────────────────────────────
     def convert_file(

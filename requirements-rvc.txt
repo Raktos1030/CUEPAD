@@ -25,3 +25,21 @@ requests
 torchcrepe          # 'crepe' pitch method
 pyworld             # 'harvest' / 'dio' pitch methods
 praat-parselmouth   # 'pm' pitch method
+
+# ─── Optional GPU acceleration ─────────────────────────────────────────
+# CPU inference is fine for offline 'Convertir un son', but the live mic
+# voice changer needs GPU to keep up. Pick ONE of the following based on
+# your hardware AFTER the base install above:
+#
+#   - AMD GPU on Windows (e.g. RX 7900 XTX/GRE, RX 6000 series):
+#       pip install torch-directml
+#     Auto-detected by the engine. May require pinning torch to a
+#     compatible version — if pip yells, try `pip install torch==2.4.*`
+#     first then `pip install torch-directml`.
+#
+#   - Intel Arc / iGPU on Windows: same as AMD (DirectML).
+#
+#   - NVIDIA GPU on Windows: replace `torch` above with the CUDA build,
+#       pip uninstall -y torch torchaudio
+#       pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+#     Auto-detected as CUDA, no extra package needed.
