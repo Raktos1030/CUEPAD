@@ -189,17 +189,57 @@ class OnnxRvcSession:
             else:
                 provider_options.append({})
 
+        # ORT_ENABLE_ALL turns on layer fusion, constant folding and
+        # transpose-elimination — ORT_ENABLE_BASIC (default) leaves a lot
+        # of speed on the table for transformer-heavy graphs like HuBERT.
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
         # Synthesizer.
         self.synth = ort.InferenceSession(
-            str(synth_onnx), providers=providers, provider_options=provider_options,
+            str(synth_onnx),
+            sess_options=sess_options,
+            providers=providers, provider_options=provider_options,
         )
         # ContentVec / HuBERT.
         self.cvec = ort.InferenceSession(
-            str(contentvec_onnx), providers=providers, provider_options=provider_options,
+            str(contentvec_onnx),
+            sess_options=sess_options,
+            providers=providers, provider_options=provider_options,
         )
         self._synth_input_names = [i.name for i in self.synth.get_inputs()]
         self._cvec_input_name = self.cvec.get_inputs()[0].name
         self.active_providers = self.synth.get_providers()
+
+        self._warmup()
+
+    def _warmup(self) -> None:
+        """Pre-trigger DML shader compilation so the first live chunk
+        doesn't cost multi-second JIT inside the audio worker. The synth
+        warmup uses the same T=200 the ONNX was exported with; live
+        chunks at a different T will still pay one recompile but the
+        bulk of the kernel cache is primed."""
+        import time
+        t0 = time.monotonic()
+        self.cvec.run(None, {
+            self._cvec_input_name: np.zeros((1, 1, 16000), dtype=np.float32),
+        })
+        t_cvec = (time.monotonic() - t0) * 1000.0
+
+        t1 = time.monotonic()
+        T = 200
+        feed = dict(zip(self._synth_input_names, [
+            np.zeros((1, T, 768), dtype=np.float32),  # phone
+            np.array([T],          dtype=np.int64),    # phone_lengths
+            np.zeros((1, T),       dtype=np.int64),    # pitch
+            np.zeros((1, T),       dtype=np.float32),  # pitchf
+            np.array([0],          dtype=np.int64),    # ds
+            np.zeros((1, 192, T),  dtype=np.float32),  # rnd
+        ]))
+        self.synth.run(None, feed)
+        t_synth = (time.monotonic() - t1) * 1000.0
+        print(f"[VC] ONNX warmup: cvec {t_cvec:.0f}ms · synth {t_synth:.0f}ms",
+              flush=True)
 
     def extract_features(self, audio_16k: np.ndarray) -> np.ndarray:
         """Run the ContentVec ONNX over mono 16 kHz audio. Returns
