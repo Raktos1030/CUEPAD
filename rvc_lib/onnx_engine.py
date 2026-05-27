@@ -89,30 +89,74 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
             verbose=False,
         )
 
-        try:
-            import onnx
-            from onnxconverter_common import float16 as ocnn_fp16
-            model = onnx.load(fp32_path)
-            model = ocnn_fp16.convert_float_to_float16(
-                model, keep_io_types=True, disable_shape_infer=False,
-            )
-            onnx.save(model, str(onnx_path))
-            size_mb = Path(onnx_path).stat().st_size // (1024 * 1024)
-            print(f"[VC] synth ONNX exported FP16 ({size_mb} MB)", flush=True)
-        except ImportError:
-            print(
-                "[VC] onnxconverter-common absent — synth en FP32 (plus lent). "
-                "Installe : pip install onnxconverter-common",
-                flush=True,
-            )
-            shutil.copy2(fp32_path, str(onnx_path))
-        except Exception as e:
-            print(f"[VC] FP16 conversion failed ({type(e).__name__}: {e}) — "
-                  f"fallback FP32", flush=True)
-            shutil.copy2(fp32_path, str(onnx_path))
+        _try_fp16_then_fp32(fp32_path, str(onnx_path))
     finally:
         try: os.unlink(fp32_path)
         except OSError: pass
+
+
+def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
+    """Best-effort FP16 conversion with a smoke-test gate, FP32 fallback.
+
+    Two known footguns the conversion has to dodge:
+     - The NSF source generator (`/dec/m_source/...`) uses explicit Cast
+       nodes that convert_float_to_float16 mistypes — output stays FP32
+       while neighbours become FP16, ORT then rejects the model at load.
+       Workaround: pass those node names in node_block_list so the NSF
+       subgraph stays FP32. The bulk of the graph (HiFi-GAN-style
+       decoder + flow) is still converted, which is where the speedup
+       actually lives.
+     - The converter's max_finite_val defaults to 1e4, which truncates
+       innocent scale factors like `48000.0` to `10000.0` — silently
+       breaks pitch math. Bump to 65504 (FP16 finite max).
+    """
+    import shutil
+    try:
+        import onnx as _onnx
+        from onnxconverter_common import float16 as ocnn_fp16
+        import onnxruntime as _ort
+    except ImportError:
+        print("[VC] onnxconverter-common absent — synth en FP32 (plus lent). "
+              "Installe : pip install onnxconverter-common", flush=True)
+        shutil.copy2(fp32_path, final_path)
+        return
+
+    try:
+        model_proto = _onnx.load(fp32_path)
+        nsf_nodes = [n.name for n in model_proto.graph.node
+                     if 'm_source' in n.name]
+        converted = ocnn_fp16.convert_float_to_float16(
+            model_proto,
+            keep_io_types=True,
+            node_block_list=nsf_nodes,
+            max_finite_val=65504.0,
+            disable_shape_infer=False,
+        )
+        fp16_path = final_path + ".tmp.fp16.onnx"
+        _onnx.save(converted, fp16_path)
+
+        # Smoke-test: ORT must accept the converted graph. Catches any
+        # residual type-mismatch the NSF block didn't cover. CPU EP is
+        # enough — the failure mode we hit is at graph-load time, not
+        # at compute time.
+        try:
+            sess = _ort.InferenceSession(
+                fp16_path, providers=["CPUExecutionProvider"],
+            )
+            del sess
+        except Exception as e_load:
+            try: import os; os.unlink(fp16_path)
+            except OSError: pass
+            raise RuntimeError(f"ORT rejected FP16 model: {e_load}") from e_load
+
+        shutil.move(fp16_path, final_path)
+        size_mb = Path(final_path).stat().st_size // (1024 * 1024)
+        print(f"[VC] synth ONNX exported FP16 (NSF kept FP32) — {size_mb} MB",
+              flush=True)
+    except Exception as e:
+        print(f"[VC] FP16 conversion failed ({type(e).__name__}: {e}) — "
+              f"fallback FP32", flush=True)
+        shutil.copy2(fp32_path, final_path)
 
 
 def export_contentvec_to_onnx(dest_path: str | Path,
