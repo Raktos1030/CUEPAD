@@ -29,6 +29,14 @@ import torch
 HUBERT_MODEL_ID = "lengyue233/content-vec-best"
 
 
+def _torch_version_or_unknown() -> str:
+    try:
+        import torch
+        return getattr(torch, "__version__", "unknown")
+    except Exception:
+        return "unknown"
+
+
 class HubertContentExtractor:
     """Thin fairseq-compatible wrapper around transformers HubertModel."""
 
@@ -36,10 +44,19 @@ class HubertContentExtractor:
                  model_id: str = HUBERT_MODEL_ID, cache_dir: str | None = None):
         try:
             from transformers import HubertModel
-        except Exception as e:
+        except ImportError as e:
             raise RuntimeError(
-                "transformers indisponible — installe avec : "
+                "transformers introuvable — installe avec : "
                 "pip install -r requirements-rvc.txt"
+            ) from e
+        except Exception as e:
+            # transformers IS importable but one of its modules choked —
+            # usually a torch version mismatch (e.g. torch 2.4 + a
+            # transformers release that needs a newer torch API).
+            raise RuntimeError(
+                f"transformers a planté à l'import: {e!r} — vérifie que la "
+                f"version de transformers est compatible avec ton torch "
+                f"({_torch_version_or_unknown()})."
             ) from e
         # First time: downloads ~360 MB from HuggingFace into cache_dir.
         self.model = HubertModel.from_pretrained(model_id, cache_dir=cache_dir)
