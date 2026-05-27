@@ -608,14 +608,22 @@ class VoiceChanger:
                 f"sur {self._device_label} — l'op a probablement échoué silencieusement"
             )
             out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+            return out
         self.last_chunk_peak = float(np.abs(out).max()) if out.size else 0.0
-        if self.last_chunk_peak < 1e-5:
-            # All-zero output is the DirectML "silent failure" symptom.
+        # Distinguish "user wasn't speaking, so output is naturally silent"
+        # from "model produced zeros despite real input". The first case is
+        # the normal idle state — flagging it as an error filled the UI
+        # with false positives whenever the mic captured a quiet moment.
+        in_peak = float(np.abs(audio_16k).max()) if audio_16k.size else 0.0
+        if self.last_chunk_peak < 1e-5 and in_peak > 5e-3:
             self.last_chunk_error = (
-                f"sortie ≈ silence (peak={self.last_chunk_peak:.6f}) sur {self._device_label}. "
-                "Essaie une autre méthode F0 (CREPE / HARVEST) — RMVPE peut casser sur "
-                "DirectML (onnxruntime manquant) ou sur de tout petits chunks."
+                f"sortie ≈ silence (peak={self.last_chunk_peak:.6f}) malgré "
+                f"un signal d'entrée (peak={in_peak:.3f}) sur {self._device_label}. "
+                "Essaie une autre méthode F0 (CREPE / HARVEST)."
             )
         else:
+            # Either we produced real audio, or the user wasn't talking.
+            # Either way, clear any previous error so the UI doesn't keep
+            # showing a stale message.
             self.last_chunk_error = None
         return out

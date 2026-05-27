@@ -354,11 +354,11 @@ class LiveRvcEngine:
             except Exception as e:
                 self._last_error = f"infer: {e}"
                 out = None
-            # Surface diagnostics from process_chunk (exception swallowed,
-            # silent / NaN output, etc) onto the engine status.
-            err = getattr(self.vc, "last_chunk_error", None)
-            if err:
-                self._last_error = err
+            else:
+                # Mirror process_chunk's most recent diagnostic onto the
+                # engine status — including None when the latest chunk was
+                # fine, so an old error message doesn't stick on the UI.
+                self._last_error = getattr(self.vc, "last_chunk_error", None)
             dt_ms = (time.monotonic() - t0) * 1000.0
             self._chunk_count += 1
             self._avg_infer_ms = (
