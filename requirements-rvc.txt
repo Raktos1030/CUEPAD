@@ -18,6 +18,12 @@ torchaudio
 # package from the onnxruntime / onnxruntime-directml install below
 # (which is the actual inference runtime).
 onnx
+# After torch.onnx.export, we convert the synth graph to FP16 internally
+# (keep_io_types=True, so callers still see FP32 IO). RDNA3 / Ampere+ run
+# the inner conv/matmul stack ~1.5-2× faster in FP16 — meaningful on the
+# live mic path. Optional: if missing, the export falls back to FP32 with
+# a terminal warning.
+onnxconverter-common
 # transformers 4.50+ pulls torch.distributed.tensor.device_mesh which only
 # landed in torch 2.5. If you've installed torch-directml (AMD/Intel GPU,
 # see below), pip downgrades torch to 2.4.x and the latest transformers

@@ -224,6 +224,14 @@ class LiveRvcEngine:
         self._chunk_ms = CHUNK_PRESETS.get(latency, CHUNK_PRESETS["medium"])
         self.update_params(**{k: v for k, v in params.items() if k in self._params})
 
+        # ONNX/DirectML compiles shaders per tensor shape on first hit, so
+        # the very first live chunk would otherwise spend multi-second JIT
+        # inside the audio worker. Pre-compile at the exact T_synth before
+        # the stream is opened — no-op on the torch path.
+        warmup = getattr(self.vc, "warmup_onnx_for_chunk_ms", None)
+        if callable(warmup):
+            warmup(self._chunk_ms)
+
         # Pick a duplex sample rate the devices both support.
         try:
             in_info  = sd.query_devices(input_dev,  "input")

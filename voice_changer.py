@@ -456,8 +456,10 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # Export the synth once per voice + cache on disk.
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v2.onnx"
+        # Export the synth once per voice + cache on disk. v3 bumps the
+        # cache key for FP16 conversion + opset 17 + constant folding,
+        # which produce a different graph than what v2 cached.
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v3.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.
@@ -638,6 +640,17 @@ class VoiceChanger:
 
     def streaming_target_sr(self) -> int | None:
         return self._tgt_sr
+
+    def warmup_onnx_for_chunk_ms(self, chunk_ms: int) -> None:
+        """Tell the ONNX backend the live chunk size so it can pre-compile
+        DML shaders at the exact tensor shape. No-op on the torch path."""
+        sess = self._onnx_session
+        if sess is None:
+            return
+        try:
+            sess.warmup_for_chunk_ms(int(chunk_ms))
+        except Exception as e:
+            print(f"[VC] ONNX warmup failed: {type(e).__name__}: {e}", flush=True)
 
     last_chunk_error: Optional[str] = None
     last_chunk_peak: float = 0.0

@@ -36,7 +36,11 @@ CONTENTVEC_HF_MODEL = "lengyue233/content-vec-best"
 
 def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
     """Convert an RVC .pth into an ONNX graph that ContentVec features +
-    pitch + speaker id can be piped through. One-shot, cached on disk."""
+    pitch + speaker id can be piped through. One-shot, cached on disk.
+    Post-processes the graph to FP16 internally when onnxconverter_common
+    is available — IO stays FP32 so callers see no change, but RDNA3 /
+    Ampere+ run the inner conv/matmul stack ~1.5-2× faster."""
+    import os, shutil, tempfile
     import torch
     from rvc_lib.models_onnx import SynthesizerTrnMsNSFsidM
 
@@ -63,22 +67,52 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
     net.load_state_dict(cpt["weight"], strict=False)
     net.eval()
 
-    torch.onnx.export(
-        net,
-        (test_phone, test_phlen, test_pitch, test_pitchf, test_ds, test_rnd),
-        str(onnx_path),
-        input_names=["phone", "phone_lengths", "pitch", "pitchf", "ds", "rnd"],
-        output_names=["audio"],
-        dynamic_axes={
-            "phone":  [1],
-            "pitch":  [1],
-            "pitchf": [1],
-            "rnd":    [2],
-        },
-        do_constant_folding=False,
-        opset_version=13,
-        verbose=False,
-    )
+    # Stage to a temp path so a failed FP16 conversion still leaves the
+    # FP32 graph available to fall back to.
+    fp32_fd, fp32_path = tempfile.mkstemp(suffix=".onnx")
+    os.close(fp32_fd)
+    try:
+        torch.onnx.export(
+            net,
+            (test_phone, test_phlen, test_pitch, test_pitchf, test_ds, test_rnd),
+            fp32_path,
+            input_names=["phone", "phone_lengths", "pitch", "pitchf", "ds", "rnd"],
+            output_names=["audio"],
+            dynamic_axes={
+                "phone":  [1],
+                "pitch":  [1],
+                "pitchf": [1],
+                "rnd":    [2],
+            },
+            do_constant_folding=True,
+            opset_version=17,
+            verbose=False,
+        )
+
+        try:
+            import onnx
+            from onnxconverter_common import float16 as ocnn_fp16
+            model = onnx.load(fp32_path)
+            model = ocnn_fp16.convert_float_to_float16(
+                model, keep_io_types=True, disable_shape_infer=False,
+            )
+            onnx.save(model, str(onnx_path))
+            size_mb = Path(onnx_path).stat().st_size // (1024 * 1024)
+            print(f"[VC] synth ONNX exported FP16 ({size_mb} MB)", flush=True)
+        except ImportError:
+            print(
+                "[VC] onnxconverter-common absent — synth en FP32 (plus lent). "
+                "Installe : pip install onnxconverter-common",
+                flush=True,
+            )
+            shutil.copy2(fp32_path, str(onnx_path))
+        except Exception as e:
+            print(f"[VC] FP16 conversion failed ({type(e).__name__}: {e}) — "
+                  f"fallback FP32", flush=True)
+            shutil.copy2(fp32_path, str(onnx_path))
+    finally:
+        try: os.unlink(fp32_path)
+        except OSError: pass
 
 
 def export_contentvec_to_onnx(dest_path: str | Path,
@@ -211,35 +245,35 @@ class OnnxRvcSession:
         self._cvec_input_name = self.cvec.get_inputs()[0].name
         self.active_providers = self.synth.get_providers()
 
-        self._warmup()
-
-    def _warmup(self) -> None:
-        """Pre-trigger DML shader compilation so the first live chunk
-        doesn't cost multi-second JIT inside the audio worker. The synth
-        warmup uses the same T=200 the ONNX was exported with; live
-        chunks at a different T will still pay one recompile but the
-        bulk of the kernel cache is primed."""
+    def warmup_for_chunk_ms(self, chunk_ms: int) -> None:
+        """Pre-trigger DML shader compilation at the exact (T_cvec, T_synth)
+        that the live worker will hit, so the first realtime chunk doesn't
+        cost multi-second JIT inside the audio callback. DML caches kernels
+        per shape, so warming up at the wrong T buys us nothing — we have
+        to use the real one (= chunk_ms × 16 / 320 × 2)."""
         import time
+        samples = max(320, int(chunk_ms * 16))     # 16 kHz mono
+        t_synth = max(2, samples // 320 * 2)        # cvec hop=320, 2× upsample
         t0 = time.monotonic()
         self.cvec.run(None, {
-            self._cvec_input_name: np.zeros((1, 1, 16000), dtype=np.float32),
+            self._cvec_input_name: np.zeros((1, 1, samples), dtype=np.float32),
         })
-        t_cvec = (time.monotonic() - t0) * 1000.0
+        dt_cvec = (time.monotonic() - t0) * 1000.0
 
         t1 = time.monotonic()
-        T = 200
         feed = dict(zip(self._synth_input_names, [
-            np.zeros((1, T, 768), dtype=np.float32),  # phone
-            np.array([T],          dtype=np.int64),    # phone_lengths
-            np.zeros((1, T),       dtype=np.int64),    # pitch
-            np.zeros((1, T),       dtype=np.float32),  # pitchf
-            np.array([0],          dtype=np.int64),    # ds
-            np.zeros((1, 192, T),  dtype=np.float32),  # rnd
+            np.zeros((1, t_synth, 768), dtype=np.float32),  # phone
+            np.array([t_synth],          dtype=np.int64),    # phone_lengths
+            np.zeros((1, t_synth),       dtype=np.int64),    # pitch
+            np.zeros((1, t_synth),       dtype=np.float32),  # pitchf
+            np.array([0],                dtype=np.int64),    # ds
+            np.zeros((1, 192, t_synth),  dtype=np.float32),  # rnd
         ]))
         self.synth.run(None, feed)
-        t_synth = (time.monotonic() - t1) * 1000.0
-        print(f"[VC] ONNX warmup: cvec {t_cvec:.0f}ms · synth {t_synth:.0f}ms",
-              flush=True)
+        dt_synth = (time.monotonic() - t1) * 1000.0
+        print(f"[VC] ONNX warmup @T_synth={t_synth} "
+              f"(chunk={chunk_ms}ms): cvec {dt_cvec:.0f}ms · "
+              f"synth {dt_synth:.0f}ms", flush=True)
 
     def extract_features(self, audio_16k: np.ndarray) -> np.ndarray:
         """Run the ContentVec ONNX over mono 16 kHz audio. Returns
