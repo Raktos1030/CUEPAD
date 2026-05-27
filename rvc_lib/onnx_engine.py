@@ -97,7 +97,18 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
 
 
 def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
-    """Synth-specific wrapper around the generic mixed-precision pass."""
+    """Synth-specific wrapper around the generic mixed-precision pass.
+
+    Routes through the static converter with op_block_list=['Cast'] —
+    same path that finally worked for contentvec. The auto path's
+    rtol=1e-2 bisection is conservative on this graph (synth came out
+    at ~600-700 ms with very few ops actually flipped to FP16); the
+    static path converts everything except Cast unconditionally, which
+    on RDNA3 with packed-FP16 math should bring the synth into the
+    300-500 ms range. Cast nodes stay FP32 because the synth's NSF
+    source generator and the encoder's attention scaling rely on them
+    keeping their original type (every previous attempt to convert
+    those Casts broke the model at ORT load)."""
     import numpy as _np
     T = 64
     feed = {
@@ -110,6 +121,7 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     }
     _try_fp16_then_fp32_with_feed(
         src_fp32=fp32_path, dst=final_path, feed=feed, label="synth",
+        op_block_list=["Cast"],
     )
 
 
@@ -218,13 +230,17 @@ def _try_static_fp16_then_fp32(src_fp32: str, dst: str,
             raise RuntimeError(f"ORT rejected FP16 model: {e_load}") from e_load
         shutil.move(tmp_path, dst)
         size_mb = Path(dst).stat().st_size // (1024 * 1024)
-        fp16_count = sum(
-            1 for n in converted.graph.node
-            for a in n.attribute
-            if a.name == 'to' and a.i == _onnx.TensorProto.FLOAT16
+        # Real coverage proxy: how many weight tensors are FP16. The
+        # "Cast.to == FLOAT16" count is misleading because it only sees
+        # explicit cast nodes — Conv/MatMul/etc. have their dtype
+        # changed via their input tensors, not via a `to` attribute.
+        fp16_weights = sum(
+            1 for t in converted.graph.initializer
+            if t.data_type == _onnx.TensorProto.FLOAT16
         )
+        total_weights = len(converted.graph.initializer)
         print(f"[VC] {label} ONNX static-FP16 saved — {size_mb} MB, "
-              f"~{fp16_count} FP16 ops", flush=True)
+              f"{fp16_weights}/{total_weights} weights FP16", flush=True)
     except Exception as e:
         print(f"[VC] {label} static-FP16 failed "
               f"({type(e).__name__}: {e}) — fallback FP32 (simplified)",

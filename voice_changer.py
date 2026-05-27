@@ -456,10 +456,12 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # Export the synth once per voice + cache on disk. v6 bumps the
-        # cache key for auto-mixed-precision FP16 (replaces the static
-        # blocklist approach that failed to load on this graph).
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v6.onnx"
+        # Export the synth once per voice + cache on disk. v7 bumps the
+        # cache key for static-FP16 with op_block_list=['Cast'] — same
+        # path that successfully FP16'd the contentvec. v6 ran through
+        # auto_convert which was so conservative (rtol=1e-2) that very
+        # few ops actually flipped to FP16 and synth stayed ~700 ms.
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v7.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.
