@@ -273,6 +273,16 @@ class OnnxRvcSession:
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
+        # DML-specific tuning: DirectML manages its own GPU allocations,
+        # ORT's mem_pattern + cpu_mem_arena layer over the top causes
+        # redundant work / fragmentation; both faster off. Parallel
+        # execution lets independent ops dispatch concurrently, which
+        # matters on DML where per-op launch overhead dominates.
+        if "DmlExecutionProvider" in providers:
+            sess_options.enable_mem_pattern = False
+            sess_options.enable_cpu_mem_arena = False
+            sess_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+
         # Synthesizer.
         self.synth = ort.InferenceSession(
             str(synth_onnx),
