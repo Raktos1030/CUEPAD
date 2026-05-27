@@ -25,11 +25,12 @@ app = Flask(__name__, template_folder=str(_template_dir))
 services: dict = {}
 
 
-def configure(*, converter, library, audio, live, hotkeys, settings, on_show, on_quit):
+def configure(*, converter, library, audio, live, voice_changer, hotkeys, settings, on_show, on_quit):
     services["converter"] = converter
     services["library"] = library
     services["audio"] = audio
     services["live"] = live
+    services["voice_changer"] = voice_changer
     services["hotkeys"] = hotkeys
     services["settings"] = settings
     services["on_show"] = on_show
@@ -252,6 +253,129 @@ def live_config():
     cfg = _clean_effects(data.get("config") or data) or {}
     services["live"].update_config(cfg)
     return jsonify({"ok": True, "config": cfg})
+
+
+# ─────────────────────────── Voice changer (RVC offline) ──────────────────
+
+import threading as _threading
+import uuid as _uuid
+import time as _time
+_vc_jobs: dict = {}
+_vc_jobs_lock = _threading.Lock()
+
+
+@app.route("/voice-ai/status")
+def vc_status():
+    return jsonify(services["voice_changer"].status())
+
+
+@app.route("/voice-ai/voices")
+def vc_voices():
+    return jsonify({"items": services["voice_changer"].list_voices()})
+
+
+@app.route("/voice-ai/voices/import", methods=["POST"])
+def vc_voice_import():
+    pth = request.files.get("pth")
+    idx = request.files.get("index")  # optional
+    name = (request.form.get("name") or "").strip()
+    if not pth or not pth.filename:
+        return jsonify({"ok": False, "error": ".pth manquant"}), 400
+    if not name:
+        name = Path(pth.filename).stem
+    from werkzeug.utils import secure_filename
+    tmp = Path(services["library"].root) / ".vc-tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    pth_path = tmp / secure_filename(pth.filename)
+    pth.save(pth_path)
+    idx_path = None
+    if idx and idx.filename:
+        idx_path = tmp / secure_filename(idx.filename)
+        idx.save(idx_path)
+    try:
+        ok, err = services["voice_changer"].import_voice(name, pth_path, idx_path)
+    finally:
+        try: pth_path.unlink()
+        except Exception: pass
+        if idx_path:
+            try: idx_path.unlink()
+            except Exception: pass
+    return jsonify({"ok": ok, "error": err, "items": services["voice_changer"].list_voices()})
+
+
+@app.route("/voice-ai/voices/<name>", methods=["DELETE"])
+def vc_voice_delete(name):
+    ok = services["voice_changer"].delete_voice(name)
+    return jsonify({"ok": ok, "items": services["voice_changer"].list_voices()})
+
+
+@app.route("/voice-ai/jobs", methods=["POST"])
+def vc_jobs_create():
+    data = request.get_json(silent=True) or {}
+    voice = (data.get("voice") or "").strip()
+    source_filename = (data.get("source") or "").strip()  # in soundboard library
+    out_name = (data.get("out_name") or "").strip()
+    if not voice or not source_filename:
+        return jsonify({"ok": False, "error": "voice et source requis"}), 400
+    src_path = services["library"].get_path(source_filename)
+    if not src_path:
+        return jsonify({"ok": False, "error": "Source introuvable"}), 404
+    if not out_name:
+        out_name = f"{Path(source_filename).stem}-{voice}"
+    params = {
+        "f0_up_key":   int(data.get("f0_up_key") or 0),
+        "f0_method":   str(data.get("f0_method") or "rmvpe"),
+        "index_rate":  float(data.get("index_rate") or 0.5),
+        "protect":     float(data.get("protect") or 0.33),
+    }
+
+    job_id = _uuid.uuid4().hex[:12]
+    out_path = Path(services["library"].root) / f"{out_name}.wav"
+    n = 2
+    while out_path.exists():
+        out_path = Path(services["library"].root) / f"{out_name}-{n}.wav"
+        n += 1
+
+    with _vc_jobs_lock:
+        _vc_jobs[job_id] = {
+            "id": job_id, "voice": voice, "source": source_filename,
+            "status": "queued", "started": _time.time(),
+            "out_filename": out_path.name, "out_path": str(out_path),
+            "error": None, "elapsed_ms": 0,
+        }
+
+    def runner():
+        with _vc_jobs_lock:
+            _vc_jobs[job_id]["status"] = "running"
+        t0 = _time.monotonic()
+        ok, err = services["voice_changer"].convert_file(
+            voice_name=voice,
+            input_path=str(src_path),
+            output_path=str(out_path),
+            **params,
+        )
+        with _vc_jobs_lock:
+            j = _vc_jobs[job_id]
+            j["elapsed_ms"] = int((_time.monotonic() - t0) * 1000)
+            if ok and out_path.exists():
+                j["status"] = "done"
+            else:
+                j["status"] = "error"
+                j["error"] = err or "Sortie introuvable"
+                try: out_path.unlink()
+                except Exception: pass
+
+    _threading.Thread(target=runner, daemon=True).start()
+    return jsonify({"ok": True, "job_id": job_id})
+
+
+@app.route("/voice-ai/jobs/<job_id>")
+def vc_jobs_status(job_id):
+    with _vc_jobs_lock:
+        j = _vc_jobs.get(job_id)
+    if not j:
+        return jsonify({"error": "Job inconnu"}), 404
+    return jsonify(j)
 
 
 @app.route("/effects/file/process", methods=["POST"])

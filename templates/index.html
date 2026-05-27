@@ -957,6 +957,36 @@
     .fx-file-status.ok    { border-left-color: var(--led-lime); color: var(--led-lime); }
     .fx-file-status.error { border-left-color: var(--error);    color: var(--error); }
 
+    /* Voice IA — voice list rows */
+    .vc-voice {
+      display: flex; align-items: center; gap: 12px;
+      padding: 9px 12px; background: var(--bg-2);
+      border: 1px solid var(--line); border-radius: 5px;
+    }
+    .vc-voice-name {
+      font-family: var(--f-display); font-weight: 600; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .vc-voice-meta {
+      font-family: var(--f-mono); font-size: 0.66rem; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .vc-voice-meta .has-index {
+      color: var(--led-lime); margin-left: 6px;
+    }
+    .vc-voice-del {
+      background: transparent; border: 1px solid var(--line-strong);
+      color: var(--error); width: 28px; height: 28px;
+      border-radius: 4px; cursor: pointer;
+      display: grid; place-items: center;
+    }
+    .vc-voice-del:hover { background: rgba(255, 90, 110, 0.1); }
+    .vc-voice-del svg { width: 12px; height: 12px; }
+    .vc-empty {
+      font-family: var(--f-mono); font-size: 0.74rem;
+      color: var(--muted); padding: 14px 0; text-align: center;
+    }
+
     /* Collapsible effects panel (used in edit modal) */
     .fx-panel.collapsible .fx-panel-head { cursor: pointer; user-select: none; }
     .fx-panel.collapsible .fx-panel-toggle {
@@ -1353,6 +1383,7 @@
       <div class="fx-tab-switch">
         <button class="fx-subtab active" data-subtab="live">LIVE MIC</button>
         <button class="fx-subtab" data-subtab="file">FICHIER</button>
+        <button class="fx-subtab" data-subtab="voiceai">VOIX IA</button>
       </div>
 
       <!-- ── LIVE MIC ─────────────────────────────────────────────────── -->
@@ -1432,6 +1463,98 @@
             APPLIQUER ET AJOUTER À LA SOUNDBOARD
           </button>
           <div class="fx-file-status" id="fx-file-status" style="display: none;"></div>
+        </div>
+      </div>
+
+      <!-- ── VOIX IA ──────────────────────────────────────────────────── -->
+      <div class="fx-subpane" id="fx-subpane-voiceai" style="display: none;">
+        <div class="virtual-banner" id="vc-banner" style="display: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <div>
+            <strong id="vc-banner-title">Moteur RVC</strong>
+            <span id="vc-banner-msg"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="section-title">État</h2>
+          <div class="settings-row">
+            <div class="label">
+              <div class="ttl" id="vc-status-title">Initialisation…</div>
+              <div class="sub" id="vc-status-sub">Le moteur RVC télécharge HuBERT + RMVPE (~540 MB) au premier lancement. Patience.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 18px;">
+          <h2 class="section-title">Tes voix <span class="badge" id="vc-voice-count">0</span></h2>
+          <div id="vc-voice-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+
+          <div style="border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px;">
+            <div class="group-label" style="margin-bottom: 10px;">Importer une voix</div>
+            <div class="field-row">
+              <div class="field">
+                <div class="group-label">Nom</div>
+                <input type="text" class="text-input" id="vc-import-name" placeholder="mbappe"/>
+              </div>
+              <div class="field">
+                <div class="group-label">Fichier .pth (modèle)</div>
+                <input type="file" id="vc-import-pth" accept=".pth"/>
+              </div>
+            </div>
+            <div class="field">
+              <div class="group-label">Fichier .index (optionnel — recommandé)</div>
+              <input type="file" id="vc-import-index" accept=".index"/>
+            </div>
+            <button class="btn" id="vc-import-btn" style="margin-top: 6px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              IMPORTER
+            </button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 18px;">
+          <h2 class="section-title">Convertir un son</h2>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Source (depuis ta soundboard)</div>
+              <select class="select" id="vc-source"></select>
+            </div>
+            <div class="field">
+              <div class="group-label">Voix</div>
+              <select class="select" id="vc-voice"></select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Décalage pitch <span class="fx-mod-val" id="vc-pitch-val" style="display:inline-block;">0 st</span></div>
+              <input type="range" min="-12" max="12" step="1" value="0" class="slider" id="vc-pitch"/>
+            </div>
+            <div class="field">
+              <div class="group-label">Méthode F0</div>
+              <div class="seg" id="vc-f0-seg">
+                <button class="seg-btn active" data-value="rmvpe">RMVPE</button>
+                <button class="seg-btn" data-value="crepe">CREPE</button>
+                <button class="seg-btn" data-value="harvest">HARVEST</button>
+                <button class="seg-btn" data-value="pm">PM</button>
+              </div>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="group-label">Force de l'index <span class="fx-mod-val" id="vc-index-val" style="display:inline-block;">50%</span></div>
+              <input type="range" min="0" max="100" step="5" value="50" class="slider" id="vc-index"/>
+            </div>
+            <div class="field">
+              <div class="group-label">Nom du fichier de sortie</div>
+              <input type="text" class="text-input" id="vc-outname" placeholder="auto"/>
+            </div>
+          </div>
+          <button class="btn primary" id="vc-convert-btn" style="width: 100%; margin-top: 10px;" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6m0 0l-3-3m3 3l3-3"/><path d="M3 14h18"/><path d="M3 18l4-4M21 18l-4-4"/></svg>
+            CONVERTIR ET AJOUTER À LA SOUNDBOARD
+          </button>
+          <div class="fx-file-status" id="vc-job-status" style="display: none;"></div>
         </div>
       </div>
     </div>
@@ -2932,15 +3055,219 @@
     // Status polling — keep running so xrun counter ticks.
     setInterval(refreshLiveStatus, 1000);
 
-    // Sub-tabs (LIVE / FICHIER)
+    // Sub-tabs (LIVE / FICHIER / VOIX IA)
     document.querySelectorAll('.fx-subtab').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.fx-subtab').forEach(b => b.classList.toggle('active', b === btn));
         const target = btn.dataset.subtab;
-        $('#fx-subpane-live').style.display = target === 'live' ? '' : 'none';
-        $('#fx-subpane-file').style.display = target === 'file' ? '' : 'none';
+        $('#fx-subpane-live').style.display    = target === 'live'    ? '' : 'none';
+        $('#fx-subpane-file').style.display    = target === 'file'    ? '' : 'none';
+        $('#fx-subpane-voiceai').style.display = target === 'voiceai' ? '' : 'none';
+        if (target === 'voiceai') refreshVoiceAi();
       });
     });
+
+    // ─── Voice IA (RVC offline) ─────────────────────────────────────────────
+    async function refreshVoiceAi() {
+      try {
+        const [st, vs] = await Promise.all([
+          fetch('/voice-ai/status').then(r => r.json()),
+          fetch('/voice-ai/voices').then(r => r.json()),
+        ]);
+        renderVoiceAiStatus(st);
+        renderVoiceList(vs.items || []);
+        await refreshVoiceAiSources();
+      } catch {}
+    }
+
+    function renderVoiceAiStatus(s) {
+      const banner = $('#vc-banner');
+      const t = $('#vc-status-title');
+      const sub = $('#vc-status-sub');
+      if (s.init_error) {
+        banner.style.display = 'flex';
+        $('#vc-banner-title').textContent = 'RVC indisponible';
+        $('#vc-banner-msg').textContent = s.init_error;
+        t.textContent = 'Erreur';
+        sub.textContent = s.init_error;
+      } else if (!s.ready) {
+        banner.style.display = 'none';
+        t.textContent = 'Pas encore chargé';
+        sub.textContent = `Le moteur RVC s'initialise au premier import / conversion (téléchargement HuBERT + RMVPE ~540 MB la première fois). Dossier des voix : ${s.voices_dir}`;
+      } else {
+        banner.style.display = 'none';
+        t.textContent = 'Prêt';
+        sub.textContent = `Dossier des voix : ${s.voices_dir}` + (s.current ? ` — voix chargée : ${s.current}` : '');
+      }
+    }
+
+    function renderVoiceList(items) {
+      $('#vc-voice-count').textContent = items.length;
+      const list = $('#vc-voice-list');
+      if (!items.length) {
+        list.innerHTML = `<div class="vc-empty">Aucune voix importée. Drop tes .pth + .index en bas.</div>`;
+      } else {
+        list.innerHTML = items.map(v => `
+          <div class="vc-voice" data-name="${escapeAttr(v.name)}">
+            <div>
+              <div class="vc-voice-name">${escapeHtml(v.name)}</div>
+              <div class="vc-voice-meta">${v.size_mb} MB${v.has_index ? '<span class="has-index">· INDEX ✓</span>' : ' · pas d\'index'}</div>
+            </div>
+            <div style="flex:1"></div>
+            <button class="vc-voice-del" data-name="${escapeAttr(v.name)}" title="Supprimer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+        `).join('');
+        list.querySelectorAll('.vc-voice-del').forEach(b => {
+          b.addEventListener('click', async () => {
+            if (!confirm(`Supprimer la voix "${b.dataset.name}" ?`)) return;
+            await fetch(`/voice-ai/voices/${encodeURIComponent(b.dataset.name)}`, {method: 'DELETE'});
+            refreshVoiceAi();
+          });
+        });
+      }
+      // Rebuild voice select for the convert form
+      const sel = $('#vc-voice');
+      sel.innerHTML = items.length
+        ? items.map(v => `<option value="${escapeAttr(v.name)}">${escapeHtml(v.name)}</option>`).join('')
+        : `<option value="">Aucune voix importée</option>`;
+      updateConvertEnabled();
+    }
+
+    async function refreshVoiceAiSources() {
+      // Reuse the existing sounds list as conversion sources.
+      await refreshSounds();
+      const sel = $('#vc-source');
+      sel.innerHTML = state.sounds.length
+        ? state.sounds.map(s => `<option value="${escapeAttr(s.filename)}">${escapeHtml(s.stem)}</option>`).join('')
+        : `<option value="">Aucun son dans la soundboard</option>`;
+      updateConvertEnabled();
+    }
+
+    function updateConvertEnabled() {
+      const ok = $('#vc-source').value && $('#vc-voice').value;
+      $('#vc-convert-btn').disabled = !ok;
+    }
+    ['#vc-source', '#vc-voice'].forEach(s => {
+      const el = document.querySelector(s);
+      if (el) el.addEventListener('change', updateConvertEnabled);
+    });
+
+    // Param sliders
+    $('#vc-pitch').addEventListener('input', () => {
+      const v = parseInt($('#vc-pitch').value, 10);
+      $('#vc-pitch-val').textContent = v === 0 ? '0 st' : (v > 0 ? `+${v} st` : `${v} st`);
+      $('#vc-pitch-val').classList.toggle('off', v === 0);
+    });
+    $('#vc-index').addEventListener('input', () => {
+      $('#vc-index-val').textContent = `${$('#vc-index').value}%`;
+    });
+    $('#vc-f0-seg').addEventListener('click', e => {
+      const b = e.target.closest('.seg-btn');
+      if (!b) return;
+      $$('#vc-f0-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+    });
+
+    // Import voice
+    $('#vc-import-btn').addEventListener('click', async () => {
+      const name = $('#vc-import-name').value.trim();
+      const pth  = $('#vc-import-pth').files[0];
+      const idx  = $('#vc-import-index').files[0];
+      if (!pth) { toast('Sélectionne un fichier .pth', true); return; }
+      const fd = new FormData();
+      if (name) fd.append('name', name);
+      fd.append('pth', pth);
+      if (idx) fd.append('index', idx);
+      $('#vc-import-btn').disabled = true;
+      try {
+        const r = await fetch('/voice-ai/voices/import', {method: 'POST', body: fd});
+        const d = await r.json();
+        if (d.ok) {
+          toast('Voix importée');
+          $('#vc-import-name').value = '';
+          $('#vc-import-pth').value = '';
+          $('#vc-import-index').value = '';
+          refreshVoiceAi();
+        } else {
+          toast(d.error || 'Import échoué', true);
+        }
+      } catch {
+        toast('Erreur réseau', true);
+      } finally {
+        $('#vc-import-btn').disabled = false;
+      }
+    });
+
+    // Convert
+    let vcPollTimer = null;
+    $('#vc-convert-btn').addEventListener('click', async () => {
+      const voice = $('#vc-voice').value;
+      const source = $('#vc-source').value;
+      if (!voice || !source) return;
+      const f0_method = document.querySelector('#vc-f0-seg .seg-btn.active').dataset.value;
+      const body = {
+        voice, source,
+        out_name:    $('#vc-outname').value.trim(),
+        f0_up_key:   parseInt($('#vc-pitch').value, 10),
+        f0_method,
+        index_rate:  parseInt($('#vc-index').value, 10) / 100,
+      };
+      const btn = $('#vc-convert-btn');
+      const status = $('#vc-job-status');
+      btn.disabled = true;
+      status.style.display = 'block';
+      status.classList.remove('ok', 'error');
+      status.textContent = 'Démarrage du job…';
+      try {
+        const r = await fetch('/voice-ai/jobs', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (!d.ok) {
+          status.classList.add('error');
+          status.textContent = `✗ ${d.error || 'Job non lancé'}`;
+          btn.disabled = false;
+          return;
+        }
+        pollVcJob(d.job_id);
+      } catch (e) {
+        status.classList.add('error');
+        status.textContent = '✗ Erreur réseau';
+        btn.disabled = false;
+      }
+    });
+
+    async function pollVcJob(id) {
+      clearTimeout(vcPollTimer);
+      try {
+        const r = await fetch(`/voice-ai/jobs/${id}`);
+        const j = await r.json();
+        const status = $('#vc-job-status');
+        const btn = $('#vc-convert-btn');
+        if (j.status === 'done') {
+          status.classList.add('ok');
+          status.textContent = `✓ Ajouté à la soundboard : ${j.out_filename} (${(j.elapsed_ms/1000).toFixed(1)}s)`;
+          btn.disabled = false;
+          refreshSounds();
+          refreshVoiceAiSources();
+        } else if (j.status === 'error') {
+          status.classList.add('error');
+          status.textContent = `✗ ${j.error || 'Échec'}`;
+          btn.disabled = false;
+        } else {
+          const elapsed = Math.round((Date.now() / 1000) - j.started);
+          status.textContent = j.status === 'running'
+            ? `Conversion en cours… ${elapsed}s (RVC sur CPU = peut prendre ~30s à 2min selon la longueur)`
+            : `${j.status}…`;
+          vcPollTimer = setTimeout(() => pollVcJob(id), 1000);
+        }
+      } catch {
+        vcPollTimer = setTimeout(() => pollVcJob(id), 2000);
+      }
+    }
+
 
     // ─── File processing ────────────────────────────────────────────────────
     const fileState = { file: null };

@@ -62,6 +62,7 @@ a = Analysis(
         "audiotsm.io.array",
         "effects",
         "live_engine",
+        "voice_changer",
         "pynput",
         "pynput.keyboard",
         "pynput.keyboard._win32",
