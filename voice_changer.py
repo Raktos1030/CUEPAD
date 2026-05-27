@@ -191,7 +191,9 @@ class VoiceChanger:
     # ─── Status / introspection ────────────────────────────────────────────
     def status(self) -> dict:
         return {
-            "ready":        self._pipeline is not None,
+            # Ready when EITHER backend is up. The ONNX path leaves _pipeline
+            # None on purpose — only the session needs to exist.
+            "ready":        (self._pipeline is not None) or (self._onnx_session is not None),
             "init_error":   self._init_error,
             "current":      self._current,
             "voices_dir":   str(self.voices_dir),
@@ -201,6 +203,7 @@ class VoiceChanger:
             "device_label": self._device_label,
             "device_pref":  self._device_pref,
             "dml_adapters": _list_directml_adapters(),
+            "backend":      "onnx" if self._onnx_session is not None else "torch",
         }
 
     def list_voices(self) -> list[dict]:
@@ -373,16 +376,26 @@ class VoiceChanger:
 
         # ─── ONNX/DirectML branch ─────────────────────────────────────────
         if self._is_onnx_backend():
+            print(f"[VC] ONNX/DirectML backend selected for '{voice_name}' on {self._device_label}",
+                  flush=True)
             try:
                 self._load_onnx_path(voice_name, pth_path, cpt, if_f0, tgt_sr, version)
+                print(f"[VC] ONNX ready — providers: "
+                      f"{self._onnx_session.active_providers}", flush=True)
                 return
             except Exception as e:
                 # ONNX path failed (missing onnxruntime, export failure,
                 # whatever) — surface it and fall back to torch on CPU
                 # rather than leaving the user with a broken setup.
+                import traceback as _tb
+                err_full = _tb.format_exc()
+                print("[VC] ONNX init FAILED — falling back to torch CPU:",
+                      flush=True)
+                print(err_full, flush=True)
                 self._init_error = (
-                    f"ONNX/DirectML init échoué ({e}). Bascule en CPU. "
-                    "Si tu veux du GPU, vérifie `pip show onnxruntime-directml`."
+                    f"ONNX/DirectML init échoué ({type(e).__name__}: {e}). "
+                    "Bascule en CPU. Vérifie `pip show onnxruntime-directml` "
+                    "et regarde le terminal pour la trace complète."
                 )
                 self._device, self._device_label = "cpu", "CPU"
                 self._device_pref = "cpu"
