@@ -97,25 +97,26 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
 
 
 def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
-    """Best-effort FP16 conversion with a smoke-test gate, FP32 fallback.
+    """Best-effort mixed-precision conversion with FP32 fallback.
 
-    Two known footguns the conversion has to dodge:
-     - The NSF source generator (`/dec/m_source/...`) uses explicit Cast
-       nodes that convert_float_to_float16 mistypes — output stays FP32
-       while neighbours become FP16, ORT then rejects the model at load.
-       Workaround: pass those node names in node_block_list so the NSF
-       subgraph stays FP32. The bulk of the graph (HiFi-GAN-style
-       decoder + flow) is still converted, which is where the speedup
-       actually lives.
-     - The converter's max_finite_val defaults to 1e4, which truncates
-       innocent scale factors like `48000.0` to `10000.0` — silently
-       breaks pitch math. Bump to 65504 (FP16 finite max).
+    Static `convert_float_to_float16 + node_block_list` blew up on this
+    graph two different ways (NSF source generator Cast nodes, then
+    enc_p Cast nodes — there were probably more lurking). Instead, use
+    `auto_convert_mixed_precision`: it runs the model in FP32 first to
+    capture a reference output, then iteratively tries to convert
+    subsets of nodes to FP16, accepting only the subsets whose output
+    stays within rtol/atol of reference. Produces a graph that is FP16
+    where it's safe and FP32 where it isn't — no manual blocklist
+    maintenance, and the result is guaranteed loadable by ORT (because
+    the conversion itself ran inference to validate).
     """
     import shutil
+    import numpy as _np
     try:
         import onnx as _onnx
-        from onnxconverter_common import float16 as ocnn_fp16
-        import onnxruntime as _ort
+        from onnxconverter_common.auto_mixed_precision import (
+            auto_convert_mixed_precision,
+        )
     except ImportError:
         print("[VC] onnxconverter-common absent — synth en FP32 (plus lent). "
               "Installe : pip install onnxconverter-common", flush=True)
@@ -124,39 +125,41 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
 
     try:
         model_proto = _onnx.load(fp32_path)
-        nsf_nodes = [n.name for n in model_proto.graph.node
-                     if 'm_source' in n.name]
-        converted = ocnn_fp16.convert_float_to_float16(
+        # Realistic feed at a typical live T (~640ms chunk worth). The
+        # converter validates the FP16 candidate against the FP32
+        # reference using these inputs, so they need to exercise the
+        # graph at production-like shape and value range.
+        T = 64
+        feed = {
+            'phone':         _np.random.randn(1, T, 768).astype(_np.float32),
+            'phone_lengths': _np.array([T], dtype=_np.int64),
+            'pitch':         _np.random.randint(5, 255, size=(1, T)).astype(_np.int64),
+            'pitchf':        _np.random.uniform(50, 500, size=(1, T)).astype(_np.float32),
+            'ds':            _np.array([0], dtype=_np.int64),
+            'rnd':           _np.random.randn(1, 192, T).astype(_np.float32),
+        }
+        print("[VC] auto-mixed-precision conversion — slow (1-5 min) but "
+              "cached per voice…", flush=True)
+        converted = auto_convert_mixed_precision(
             model_proto,
+            feed,
+            rtol=1e-2,
+            atol=1e-2,
             keep_io_types=True,
-            node_block_list=nsf_nodes,
-            max_finite_val=65504.0,
-            disable_shape_infer=False,
         )
-        fp16_path = final_path + ".tmp.fp16.onnx"
-        _onnx.save(converted, fp16_path)
-
-        # Smoke-test: ORT must accept the converted graph. Catches any
-        # residual type-mismatch the NSF block didn't cover. CPU EP is
-        # enough — the failure mode we hit is at graph-load time, not
-        # at compute time.
-        try:
-            sess = _ort.InferenceSession(
-                fp16_path, providers=["CPUExecutionProvider"],
-            )
-            del sess
-        except Exception as e_load:
-            try: import os; os.unlink(fp16_path)
-            except OSError: pass
-            raise RuntimeError(f"ORT rejected FP16 model: {e_load}") from e_load
-
-        shutil.move(fp16_path, final_path)
+        _onnx.save(converted, final_path)
         size_mb = Path(final_path).stat().st_size // (1024 * 1024)
-        print(f"[VC] synth ONNX exported FP16 (NSF kept FP32) — {size_mb} MB",
-              flush=True)
+        # Count FP16-converted nodes for a rough sense of coverage.
+        fp16_count = sum(
+            1 for n in converted.graph.node
+            for a in n.attribute
+            if a.name == 'to' and a.i == _onnx.TensorProto.FLOAT16
+        )
+        print(f"[VC] synth ONNX mixed-precision saved — {size_mb} MB, "
+              f"~{fp16_count} FP16 ops", flush=True)
     except Exception as e:
-        print(f"[VC] FP16 conversion failed ({type(e).__name__}: {e}) — "
-              f"fallback FP32", flush=True)
+        print(f"[VC] mixed-precision failed ({type(e).__name__}: {e}) — "
+              f"fallback FP32 (simplified)", flush=True)
         shutil.copy2(fp32_path, final_path)
 
 

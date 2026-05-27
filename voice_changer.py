@@ -456,10 +456,10 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # Export the synth once per voice + cache on disk. v5 bumps the
-        # cache key for the onnxsim simplification pass — fewer ops on
-        # disk means fewer DML kernel launches at runtime.
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v5.onnx"
+        # Export the synth once per voice + cache on disk. v6 bumps the
+        # cache key for auto-mixed-precision FP16 (replaces the static
+        # blocklist approach that failed to load on this graph).
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v6.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.
