@@ -13,7 +13,11 @@
 
 torch
 torchaudio
-transformers
+# transformers 4.50+ pulls torch.distributed.tensor.device_mesh which only
+# landed in torch 2.5. If you've installed torch-directml (AMD/Intel GPU,
+# see below), pip downgrades torch to 2.4.x and the latest transformers
+# blows up on import. Pin under 4.50 to keep both happy.
+transformers<4.50
 faiss-cpu
 librosa
 soundfile
