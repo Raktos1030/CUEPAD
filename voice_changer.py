@@ -363,6 +363,21 @@ class VoiceChanger:
         except Exception: pass
         net_g.load_state_dict(cpt["weight"], strict=False)
         net_g.eval()
+        # Bake weight_norm parametrizations into plain weights BEFORE moving
+        # to the inference device. weight_norm keeps the original `weight_g`
+        # / `weight_v` params plus a forward hook that recomputes the actual
+        # weight on every call. On DirectML those intermediate tensors can
+        # straddle CPU and the DML device, manifesting as a hard segfault
+        # inside the C kernel (no Python traceback). Removing weight_norm
+        # collapses them into a single tensor that .to(device) moves cleanly.
+        try:
+            # The all-in-one method on SynthesizerTrn* also touches enc_q,
+            # which we just deleted — walk submodules ourselves instead.
+            net_g.dec.remove_weight_norm()
+        except Exception: pass
+        try:
+            net_g.flow.remove_weight_norm()
+        except Exception: pass
         # Move the synthesizer to whichever device the user picked.
         try:
             net_g = net_g.to(self._device)
