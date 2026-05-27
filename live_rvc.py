@@ -184,6 +184,7 @@ class LiveRvcEngine:
             "error":         self._last_error,
             "tgt_sr":        self.vc.streaming_target_sr(),
             "presets":       list(CHUNK_PRESETS.keys()),
+            "last_peak":     round(float(getattr(self.vc, "last_chunk_peak", 0.0)), 4),
         }
 
     def update_params(self, **kw):

@@ -3648,7 +3648,8 @@
         } else if (s.running) {
           st.textContent = `EN MARCHE  ${s.chunk_ms}ms`;
           st.classList.add('running');
-          stat.textContent = `UP ${s.uptime_sec}s · INFER ${s.avg_infer_ms}ms · ${s.chunks} chunks · ${s.underruns} xrun`;
+          const peak = (s.last_peak != null) ? ` · peak ${s.last_peak.toFixed(3)}` : '';
+          stat.textContent = `UP ${s.uptime_sec}s · INFER ${s.avg_infer_ms}ms · ${s.chunks} chunks · ${s.underruns} xrun${peak}`;
         } else {
           st.textContent = 'ARRÊTÉ';
           stat.textContent = '—';

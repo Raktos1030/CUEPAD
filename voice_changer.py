@@ -559,12 +559,12 @@ class VoiceChanger:
             )
             out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
         self.last_chunk_peak = float(np.abs(out).max()) if out.size else 0.0
-        if self.last_chunk_peak < 1e-4:
+        if self.last_chunk_peak < 1e-5:
             # All-zero output is the DirectML "silent failure" symptom.
             self.last_chunk_error = (
-                f"sortie silencieuse (peak={self.last_chunk_peak:.5f}) "
-                f"sur {self._device_label} — probablement un op non-supporté. "
-                "Bascule en CPU dans Accélération pour diagnostiquer."
+                f"sortie ≈ silence (peak={self.last_chunk_peak:.6f}) sur {self._device_label}. "
+                "Essaie une autre méthode F0 (CREPE / HARVEST) — RMVPE peut casser sur "
+                "DirectML (onnxruntime manquant) ou sur de tout petits chunks."
             )
         else:
             self.last_chunk_error = None
