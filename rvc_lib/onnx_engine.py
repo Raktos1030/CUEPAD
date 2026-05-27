@@ -118,22 +118,24 @@ def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
                                   op_block_list: list | None = None) -> None:
     """Best-effort mixed-precision conversion with FP32 fallback.
 
-    Static `convert_float_to_float16 + node_block_list` kept blowing up
-    on this graph (NSF Cast nodes, then enc_p Cast nodes, then more —
-    new patterns kept surfacing per export). Instead, use
-    `auto_convert_mixed_precision`: it runs the model in FP32 first to
-    capture a reference output, then iteratively tries to convert
-    subsets of nodes to FP16, accepting only the subsets whose output
-    stays within rtol/atol of reference. Produces a graph that is FP16
-    where it's safe and FP32 where it isn't — no manual blocklist
-    maintenance, and the result is guaranteed loadable by ORT (because
-    the conversion itself ran inference to validate). On any failure,
-    the simplified FP32 graph is used unchanged.
+    Two paths:
+     - If `op_block_list` is given, delegate to the static converter
+       (`convert_float_to_float16`) which accepts op-type blocklists.
+       Used for graphs where we know specific op types break the
+       auto path (e.g. ['Cast'] for HuBERT's attention which has
+       explicit casts for softmax scaling).
+     - Otherwise use `auto_convert_mixed_precision`: runs the model in
+       FP32 first to capture a reference output, then iteratively tries
+       to convert subsets of nodes to FP16, accepting only subsets
+       whose output stays within rtol/atol of reference.
 
-    `op_block_list` is forwarded to the converter so callers can
-    pre-exclude op types known to break (e.g. ['Cast'] for HuBERT's
-    attention which uses explicit Cast for softmax scaling).
+    Both paths share the FP32 fallback: any failure → simplified FP32
+    graph is saved unchanged so live inference still works.
     """
+    if op_block_list:
+        _try_static_fp16_then_fp32(src_fp32, dst, list(op_block_list), label)
+        return
+
     import shutil
     try:
         import onnx as _onnx
@@ -151,15 +153,12 @@ def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
         model_proto = _onnx.load(src_fp32)
         print(f"[VC] {label} auto-mixed-precision — slow (1-5 min) but "
               f"cached…", flush=True)
-        kwargs = dict(
+        converted = auto_convert_mixed_precision(
+            model_proto,
+            feed,
             rtol=1e-2,
             atol=1e-2,
             keep_io_types=True,
-        )
-        if op_block_list:
-            kwargs["op_block_list"] = list(op_block_list)
-        converted = auto_convert_mixed_precision(
-            model_proto, feed, **kwargs,
         )
         _onnx.save(converted, dst)
         size_mb = Path(dst).stat().st_size // (1024 * 1024)
@@ -172,6 +171,62 @@ def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
               f"~{fp16_count} FP16 ops", flush=True)
     except Exception as e:
         print(f"[VC] {label} mixed-precision failed "
+              f"({type(e).__name__}: {e}) — fallback FP32 (simplified)",
+              flush=True)
+        shutil.copy2(src_fp32, dst)
+
+
+def _try_static_fp16_then_fp32(src_fp32: str, dst: str,
+                               op_block_list: list, label: str) -> None:
+    """Static FP16 conversion using `convert_float_to_float16` with
+    op-type blocklist + smoke-test gate. Used when the auto path's API
+    can't express what we need (no op_block_list parameter) or when a
+    known-bad op family needs to be excluded from the start (HuBERT's
+    Cast nodes). On any failure → simplified FP32 fallback."""
+    import os, shutil
+    try:
+        import onnx as _onnx
+        from onnxconverter_common import float16 as ocnn_fp16
+        import onnxruntime as _ort
+    except ImportError:
+        print(f"[VC] onnxconverter-common absent — {label} en FP32",
+              flush=True)
+        shutil.copy2(src_fp32, dst)
+        return
+
+    try:
+        model_proto = _onnx.load(src_fp32)
+        print(f"[VC] {label} static-FP16 (op_block={op_block_list})…",
+              flush=True)
+        converted = ocnn_fp16.convert_float_to_float16(
+            model_proto,
+            keep_io_types=True,
+            op_block_list=op_block_list,
+            max_finite_val=65504.0,
+            disable_shape_infer=False,
+        )
+        tmp_path = dst + ".tmp.fp16.onnx"
+        _onnx.save(converted, tmp_path)
+        try:
+            sess = _ort.InferenceSession(
+                tmp_path, providers=["CPUExecutionProvider"],
+            )
+            del sess
+        except Exception as e_load:
+            try: os.unlink(tmp_path)
+            except OSError: pass
+            raise RuntimeError(f"ORT rejected FP16 model: {e_load}") from e_load
+        shutil.move(tmp_path, dst)
+        size_mb = Path(dst).stat().st_size // (1024 * 1024)
+        fp16_count = sum(
+            1 for n in converted.graph.node
+            for a in n.attribute
+            if a.name == 'to' and a.i == _onnx.TensorProto.FLOAT16
+        )
+        print(f"[VC] {label} ONNX static-FP16 saved — {size_mb} MB, "
+              f"~{fp16_count} FP16 ops", flush=True)
+    except Exception as e:
+        print(f"[VC] {label} static-FP16 failed "
               f"({type(e).__name__}: {e}) — fallback FP32 (simplified)",
               flush=True)
         shutil.copy2(src_fp32, dst)
