@@ -13,6 +13,11 @@
 
 torch
 torchaudio
+# Required by torch.onnx.export when we bake the user's .pth into a
+# frozen ONNX graph for the DirectML / ONNX Runtime backend. Separate
+# package from the onnxruntime / onnxruntime-directml install below
+# (which is the actual inference runtime).
+onnx
 # transformers 4.50+ pulls torch.distributed.tensor.device_mesh which only
 # landed in torch 2.5. If you've installed torch-directml (AMD/Intel GPU,
 # see below), pip downgrades torch to 2.4.x and the latest transformers
