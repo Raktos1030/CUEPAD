@@ -114,7 +114,8 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
 
 
 def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
-                                  feed: dict, label: str) -> None:
+                                  feed: dict, label: str,
+                                  op_block_list: list | None = None) -> None:
     """Best-effort mixed-precision conversion with FP32 fallback.
 
     Static `convert_float_to_float16 + node_block_list` kept blowing up
@@ -128,6 +129,10 @@ def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
     maintenance, and the result is guaranteed loadable by ORT (because
     the conversion itself ran inference to validate). On any failure,
     the simplified FP32 graph is used unchanged.
+
+    `op_block_list` is forwarded to the converter so callers can
+    pre-exclude op types known to break (e.g. ['Cast'] for HuBERT's
+    attention which uses explicit Cast for softmax scaling).
     """
     import shutil
     try:
@@ -146,12 +151,15 @@ def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
         model_proto = _onnx.load(src_fp32)
         print(f"[VC] {label} auto-mixed-precision — slow (1-5 min) but "
               f"cached…", flush=True)
-        converted = auto_convert_mixed_precision(
-            model_proto,
-            feed,
+        kwargs = dict(
             rtol=1e-2,
             atol=1e-2,
             keep_io_types=True,
+        )
+        if op_block_list:
+            kwargs["op_block_list"] = list(op_block_list)
+        converted = auto_convert_mixed_precision(
+            model_proto, feed, **kwargs,
         )
         _onnx.save(converted, dst)
         size_mb = Path(dst).stat().st_size // (1024 * 1024)
@@ -251,9 +259,15 @@ def export_contentvec_to_onnx(dest_path: str | Path,
         "source": (_np.random.randn(1, 1, 16000) * 0.1).astype(_np.float32),
     }
     try:
+        # HuBERT's self-attention has explicit Cast nodes for softmax
+        # scaling — same pattern that broke the synth conv. Pre-block
+        # `Cast` so the converter doesn't try to fold them and crash
+        # ORT at load. Everything else (Conv, MatMul, Add, ...) still
+        # has a shot at FP16.
         _try_fp16_then_fp32_with_feed(
             src_fp32=str(tmp), dst=str(dest),
             feed=cvec_feed, label="contentvec",
+            op_block_list=["Cast"],
         )
     finally:
         try: tmp.unlink()

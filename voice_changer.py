@@ -465,9 +465,10 @@ class VoiceChanger:
         # ContentVec ONNX is shared across voices — keep one copy in _base.
         # We bake it locally from the same HubertModel weights the torch
         # path uses; reuse the HF cache so the weights aren't pulled twice.
-        # .v3 bumps the cache for the auto-mixed-precision FP16 pass we
-        # now apply to the HuBERT graph (was just simplified FP32 in v2).
-        cvec_onnx = self.base_dir / "vec-768-layer-12.v3.onnx"
+        # .v4 bumps for the op_block_list=['Cast'] retry — v3 fell back
+        # to FP32 because the HuBERT attention's explicit Cast nodes
+        # broke the converter on every voice.
+        cvec_onnx = self.base_dir / "vec-768-layer-12.v4.onnx"
         if not cvec_onnx.exists() or cvec_onnx.stat().st_size < 100_000_000:
             export_contentvec_to_onnx(cvec_onnx, cache_dir=str(self.hf_cache_dir))
 
