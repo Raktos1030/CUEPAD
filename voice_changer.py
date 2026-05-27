@@ -453,7 +453,7 @@ class VoiceChanger:
     def _load_onnx_path(self, voice_name: str, pth_path: Path, cpt,
                         if_f0: int, tgt_sr: int, version: str):
         from rvc_lib.onnx_engine import (
-            export_synth_to_onnx, download_contentvec_onnx,
+            export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
         # Export the synth once per voice + cache on disk.
@@ -461,9 +461,11 @@ class VoiceChanger:
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.
+        # We bake it locally from the same HubertModel weights the torch
+        # path uses; reuse the HF cache so the weights aren't pulled twice.
         cvec_onnx = self.base_dir / "vec-768-layer-12.onnx"
         if not cvec_onnx.exists() or cvec_onnx.stat().st_size < 100_000_000:
-            download_contentvec_onnx(cvec_onnx)
+            export_contentvec_to_onnx(cvec_onnx, cache_dir=str(self.hf_cache_dir))
 
         providers = _providers_for(self._device_label)
         dml_idx = None

@@ -9,9 +9,9 @@ fallback and no torch C-API surface exposed to DirectML's quirks.
 This module owns:
  - export_synth_to_onnx(): one-shot conversion of a user-supplied .pth
    into <voice_dir>/<name>.onnx via torch.onnx.export.
- - download_contentvec_onnx(): grabs the HuggingFace
-   `lj1995/VoiceConversionWebUI` 768-layer-12 ContentVec ONNX into the
-   base cache so HuBERT can run on the same backend.
+ - export_contentvec_to_onnx(): bakes a layer-12 ContentVec ONNX from
+   the transformers HubertModel weights the torch path already uses,
+   so HuBERT runs on the same backend without a second download path.
  - OnnxRvcSession: cached InferenceSession trio (synth + ContentVec)
    exposing the same shape as the PyTorch path so the live worker
    doesn't care which backend it's driving.
@@ -28,8 +28,10 @@ from typing import Optional
 import numpy as np
 
 
-CONTENTVEC_URL  = "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/vec-768-layer-12.onnx"
-CONTENTVEC_SIZE = 343 * 1024 * 1024  # ~343 MB
+# No reliable public URL hosts the ContentVec ONNX (lj1995 only ships the
+# .pt). We export it ourselves from the transformers HubertModel weights
+# the rest of the pipeline already uses — one-shot, cached on disk.
+CONTENTVEC_HF_MODEL = "lengyue233/content-vec-best"
 
 
 def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
@@ -79,23 +81,81 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
     )
 
 
-def download_contentvec_onnx(dest_path: str | Path,
-                             progress_cb=None) -> None:
-    """Pull the prebuilt vec-768-layer-12 ContentVec ONNX from HuggingFace."""
-    import requests
+def export_contentvec_to_onnx(dest_path: str | Path,
+                              progress_cb=None,
+                              cache_dir: str | None = None) -> None:
+    """Bake a layer-12 ContentVec ONNX from the HuggingFace HubertModel
+    weights the torch path already uses. One-shot, cached on disk —
+    ~360 MB after export. We do it locally because no public URL hosts
+    the prebuilt ONNX (lj1995 only ships the .pt)."""
+    import torch
+    try:
+        from transformers import HubertModel
+    except ImportError as e:
+        raise RuntimeError(
+            "transformers introuvable — installe avec : "
+            "pip install -r requirements-rvc.txt"
+        ) from e
+
+    # Bridges HubertModel(input_values=(B, samples)) to the
+    # (B, 1, samples) → (B, 768, T) convention OnnxRvcSession already
+    # produces/consumes, so the ONNX we bake is shape-compatible with
+    # the lj1995 ContentVec ONNX that callers were originally written
+    # for. Inline because torch must stay a lazy import at module level.
+    class _Wrapper(torch.nn.Module):
+        def __init__(self, m, layer):
+            super().__init__()
+            self.hubert = m
+            self.layer = layer
+        def forward(self, source):
+            source = source.squeeze(1)
+            out = self.hubert(
+                input_values=source,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            feats = out.hidden_states[self.layer]
+            return feats.transpose(1, 2)
+
     dest = Path(dest_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(".onnx.part")
-    with requests.get(CONTENTVEC_URL, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        written = 0
-        with open(tmp, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 512):
-                f.write(chunk)
-                written += len(chunk)
-                if progress_cb:
-                    progress_cb(written, CONTENTVEC_SIZE)
+
+    if progress_cb:
+        progress_cb(0, 3)
+
+    model = HubertModel.from_pretrained(CONTENTVEC_HF_MODEL, cache_dir=cache_dir)
+    model.eval()
+    if progress_cb:
+        progress_cb(1, 3)
+
+    wrapped = _Wrapper(model, 12)
+    wrapped.eval()
+
+    # 1 s of mono audio @ 16 kHz matching the (1, 1, T) shape the call
+    # site in OnnxRvcSession.extract_features already produces.
+    dummy = torch.zeros(1, 1, 16000, dtype=torch.float32)
+    if progress_cb:
+        progress_cb(2, 3)
+
+    with torch.no_grad():
+        torch.onnx.export(
+            wrapped,
+            dummy,
+            str(tmp),
+            input_names=["source"],
+            output_names=["features"],
+            dynamic_axes={
+                "source":   {0: "batch", 2: "samples"},
+                "features": {0: "batch", 2: "frames"},
+            },
+            opset_version=17,
+            do_constant_folding=True,
+        )
     tmp.replace(dest)
+
+    if progress_cb:
+        progress_cb(3, 3)
 
 
 def _providers_for(device_label: str) -> list:
