@@ -76,6 +76,7 @@ class VoiceChanger:
         self._cpt        = None
         self._init_error: Optional[str] = None
         self._lock = threading.Lock()
+        self._threads_tuned = False
 
     # ─── Status / introspection ────────────────────────────────────────────
     def status(self) -> dict:
@@ -192,11 +193,24 @@ class VoiceChanger:
 
         try:
             import torch
+            import os
         except Exception as e:
             raise RuntimeError(
                 "PyTorch n'est pas installé — lance : "
                 "pip install -r requirements-rvc.txt"
             ) from e
+        # PyTorch CPU defaults to 1 thread on Windows, which leaves a Ryzen
+        # 9700X mostly idle during RVC inference. Bump to all physical cores
+        # the first time we load a voice. `set_num_interop_threads` errors
+        # if any tensor op has already happened, hence the one-shot guard.
+        if not self._threads_tuned:
+            try:
+                n = os.cpu_count() or 8
+                torch.set_num_threads(max(1, n // 2))
+                torch.set_num_interop_threads(max(1, n // 4))
+            except Exception:
+                pass
+            self._threads_tuned = True
         try:
             from rvc_lib.models import (
                 SynthesizerTrnMs768NSFsid,

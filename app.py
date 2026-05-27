@@ -307,7 +307,37 @@ def vc_voice_import():
 @app.route("/voice-ai/voices/<name>", methods=["DELETE"])
 def vc_voice_delete(name):
     ok = services["voice_changer"].delete_voice(name)
+    if ok:
+        services["settings"].delete_voice_params(name)
     return jsonify({"ok": ok, "items": services["voice_changer"].list_voices()})
+
+
+# Per-voice saved params (pitch, F0 method, index rate) — remembered across
+# sessions so picking a voice in either Convert or Live restores its tuning.
+@app.route("/voice-ai/voices/<name>/params")
+def vc_voice_params_get(name):
+    return jsonify({"params": services["settings"].voice_params(name)})
+
+
+@app.route("/voice-ai/voices/<name>/params", methods=["POST"])
+def vc_voice_params_set(name):
+    data = request.get_json(silent=True) or {}
+    allowed = {"f0_up_key", "f0_method", "index_rate", "protect", "rms_mix_rate"}
+    patch = {}
+    if "f0_up_key" in data:
+        try: patch["f0_up_key"] = max(-24, min(24, int(data["f0_up_key"])))
+        except (TypeError, ValueError): pass
+    if "f0_method" in data:
+        m = str(data["f0_method"])
+        if m in ("rmvpe", "crepe", "harvest", "pm"):
+            patch["f0_method"] = m
+    for k in ("index_rate", "protect", "rms_mix_rate"):
+        if k in data:
+            try: patch[k] = max(0.0, min(1.0, float(data[k])))
+            except (TypeError, ValueError): pass
+    if patch:
+        services["settings"].set_voice_params(name, patch)
+    return jsonify({"ok": True, "params": services["settings"].voice_params(name)})
 
 
 @app.route("/voice-ai/jobs", methods=["POST"])

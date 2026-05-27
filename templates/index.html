@@ -3211,6 +3211,8 @@
       updateConvertEnabled();
       // Mirror into the live RVC voice picker.
       if (typeof refreshLiveRvcVoices === 'function') refreshLiveRvcVoices();
+      // Auto-load saved params for whichever voice is currently selected.
+      if (sel.value && typeof loadVoiceParams === 'function') loadVoiceParams(sel.value);
     }
 
     async function refreshVoiceAiSources() {
@@ -3232,19 +3234,79 @@
       if (el) el.addEventListener('change', updateConvertEnabled);
     });
 
-    // Param sliders
+    // Per-voice saved params (offline + live read from / write to the same
+    // settings entry). Debounce writes so dragging a slider doesn't spam
+    // the server, but flush immediately on voice change.
+    let vcParamsSaveTimer = null;
+    function readVcOfflineParams() {
+      const f0_method = document.querySelector('#vc-f0-seg .seg-btn.active').dataset.value;
+      return {
+        f0_up_key:  parseInt($('#vc-pitch').value, 10),
+        f0_method,
+        index_rate: parseInt($('#vc-index').value, 10) / 100,
+      };
+    }
+    function applyVoiceParams(p) {
+      // Apply saved params to BOTH the offline and live UIs at once.
+      const setSeg = (sel, value) => $$(`${sel} .seg-btn`).forEach(b => b.classList.toggle('active', b.dataset.value === value));
+      if (p.f0_up_key != null) {
+        $('#vc-pitch').value = p.f0_up_key;
+        $('#vc-pitch').dispatchEvent(new Event('input'));
+        $('#vc-live-pitch').value = p.f0_up_key;
+        $('#vc-live-pitch').dispatchEvent(new Event('input'));
+      }
+      if (p.f0_method) {
+        setSeg('#vc-f0-seg', p.f0_method);
+        setSeg('#vc-live-f0-seg', p.f0_method);
+      }
+      if (p.index_rate != null) {
+        const pct = Math.round(p.index_rate * 100);
+        $('#vc-index').value = pct;     $('#vc-index').dispatchEvent(new Event('input'));
+        $('#vc-live-index').value = pct; $('#vc-live-index').dispatchEvent(new Event('input'));
+      }
+    }
+    function scheduleSaveVoiceParams(voice) {
+      if (!voice) return;
+      clearTimeout(vcParamsSaveTimer);
+      vcParamsSaveTimer = setTimeout(async () => {
+        try {
+          await fetch(`/voice-ai/voices/${encodeURIComponent(voice)}/params`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(readVcOfflineParams()),
+          });
+        } catch {}
+      }, 250);
+    }
+    async function loadVoiceParams(voice) {
+      if (!voice) return;
+      try {
+        const r = await fetch(`/voice-ai/voices/${encodeURIComponent(voice)}/params`);
+        const d = await r.json();
+        if (d.params) applyVoiceParams(d.params);
+      } catch {}
+    }
+    // Hook the convert-form voice select.
+    $('#vc-voice').addEventListener('change', () => {
+      const v = $('#vc-voice').value;
+      if (v) loadVoiceParams(v);
+    });
+
+    // Param sliders — update label and persist to current voice.
     $('#vc-pitch').addEventListener('input', () => {
       const v = parseInt($('#vc-pitch').value, 10);
       $('#vc-pitch-val').textContent = v === 0 ? '0 st' : (v > 0 ? `+${v} st` : `${v} st`);
       $('#vc-pitch-val').classList.toggle('off', v === 0);
+      scheduleSaveVoiceParams($('#vc-voice').value);
     });
     $('#vc-index').addEventListener('input', () => {
       $('#vc-index-val').textContent = `${$('#vc-index').value}%`;
+      scheduleSaveVoiceParams($('#vc-voice').value);
     });
     $('#vc-f0-seg').addEventListener('click', e => {
       const b = e.target.closest('.seg-btn');
       if (!b) return;
       $$('#vc-f0-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+      scheduleSaveVoiceParams($('#vc-voice').value);
     });
 
     // Import voice
@@ -3380,22 +3442,52 @@
 
     // (refreshVoiceAi / renderVoiceList call us back directly — no monkey-patch.)
 
+    function readVcLiveParams() {
+      const f0_method = document.querySelector('#vc-live-f0-seg .seg-btn.active').dataset.value;
+      return {
+        f0_up_key:  parseInt($('#vc-live-pitch').value, 10),
+        f0_method,
+        index_rate: parseInt($('#vc-live-index').value, 10) / 100,
+      };
+    }
+    function scheduleSaveLiveVoiceParams() {
+      const v = $('#vc-live-voice').value;
+      if (!v) return;
+      clearTimeout(vcParamsSaveTimer);
+      vcParamsSaveTimer = setTimeout(async () => {
+        try {
+          await fetch(`/voice-ai/voices/${encodeURIComponent(v)}/params`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(readVcLiveParams()),
+          });
+        } catch {}
+      }, 250);
+    }
+    // Load saved params when the live voice picker changes.
+    $('#vc-live-voice').addEventListener('change', () => {
+      const v = $('#vc-live-voice').value;
+      if (v) loadVoiceParams(v);
+    });
+
     // Sliders for live RVC params
     $('#vc-live-pitch').addEventListener('input', () => {
       const v = parseInt($('#vc-live-pitch').value, 10);
       $('#vc-live-pitch-val').textContent = v === 0 ? '0 st' : (v > 0 ? `+${v} st` : `${v} st`);
       $('#vc-live-pitch-val').classList.toggle('off', v === 0);
       if (liveRvcState.running) postLiveRvcParams();
+      scheduleSaveLiveVoiceParams();
     });
     $('#vc-live-index').addEventListener('input', () => {
       $('#vc-live-index-val').textContent = `${$('#vc-live-index').value}%`;
       if (liveRvcState.running) postLiveRvcParams();
+      scheduleSaveLiveVoiceParams();
     });
     $('#vc-live-f0-seg').addEventListener('click', e => {
       const b = e.target.closest('.seg-btn');
       if (!b) return;
       $$('#vc-live-f0-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
       if (liveRvcState.running) postLiveRvcParams();
+      scheduleSaveLiveVoiceParams();
     });
     $('#vc-live-latency-seg').addEventListener('click', e => {
       const b = e.target.closest('.seg-btn');

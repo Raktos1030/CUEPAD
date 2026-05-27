@@ -77,3 +77,18 @@ class Settings:
 
     def all(self) -> dict:
         return dict(self._data)
+
+    # ─── Per-voice (AI voice changer) params ───────────────────────────────
+    def voice_params(self, voice_name: str) -> dict:
+        voices = self._data.setdefault("voice_params", {})
+        return voices.get(voice_name, {})
+
+    def set_voice_params(self, voice_name: str, patch: dict):
+        voices = self._data.setdefault("voice_params", {})
+        cur = voices.setdefault(voice_name, {})
+        cur.update(patch)
+        self.save()
+
+    def delete_voice_params(self, voice_name: str):
+        self._data.get("voice_params", {}).pop(voice_name, None)
+        self.save()
