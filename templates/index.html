@@ -1401,7 +1401,6 @@
 
         <div class="card" style="margin-top: 18px;">
           <h2 class="section-title">EFFETS — appliqués en temps réel</h2>
-          <div class="fx-panel-hint" style="margin-bottom: 10px;">Le pitch est désactivé en live (offline uniquement pour l'instant)</div>
           <div id="fx-live-controls"></div>
         </div>
       </div>
@@ -2840,11 +2839,11 @@
     function onEnterEffectsTab() {
       // Build the grids the first time we land here.
       if (!$('#fx-live-controls').children.length) {
-        $('#fx-live-controls').innerHTML  = `<div class="fx-grid">${buildFxGridHTML('live-fx', false)}</div>`;
+        $('#fx-live-controls').innerHTML  = `<div class="fx-grid">${buildFxGridHTML('live-fx', true)}</div>`;
         $('#fx-file-controls').innerHTML  = `<div class="fx-grid">${buildFxGridHTML('file-fx', true)}</div>`;
-        wireFxGrid('live-fx', false, scheduleLiveSave);
-        wireFxGrid('file-fx', true,  () => refreshFxLabelsFor('file-fx', true));
-        refreshFxLabelsFor('live-fx', false);
+        wireFxGrid('live-fx', true, scheduleLiveSave);
+        wireFxGrid('file-fx', true, () => refreshFxLabelsFor('file-fx', true));
+        refreshFxLabelsFor('live-fx', true);
         refreshFxLabelsFor('file-fx', true);
       }
       refreshLiveDevices();
@@ -2858,7 +2857,7 @@
         try {
           await fetch('/effects/live/config', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({config: readFxFromPrefix('live-fx', false)}),
+            body: JSON.stringify({config: readFxFromPrefix('live-fx', true)}),
           });
         } catch {}
       }, 80);  // tight so live changes feel immediate
@@ -2906,7 +2905,7 @@
         toast('Sélectionne un micro et une sortie', true);
         return;
       }
-      const cfg = readFxFromPrefix('live-fx', false);
+      const cfg = readFxFromPrefix('live-fx', true);
       try {
         const r = await fetch('/effects/live/start', {
           method: 'POST', headers: {'Content-Type': 'application/json'},

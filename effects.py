@@ -265,6 +265,140 @@ def reverb(data: np.ndarray, sr: int, mix: float) -> np.ndarray:
 # Live (streaming) path
 # ───────────────────────────────────────────────────────────────────────────
 
+class StreamingPitchShifter:
+    """Real-time pitch shift via overlap-add granular resynthesis.
+
+    The standard way to ship pitch live: maintain an input ring buffer; every
+    `hop` input samples, take a Hann-windowed grain of `frame` samples, scale
+    its time axis by 1/pitch (linear interp), and overlap-add it back into an
+    output ring buffer at the original hop rate. The output rate matches the
+    input rate, but the perceived pitch is multiplied by `pitch`.
+
+    Latency = roughly one frame (≈ frame/sr seconds). Quality is "fun voice"
+    grade — phasey for big shifts, fine for ±7 semitones. A phase-vocoder
+    upgrade can swap into the same interface later.
+    """
+
+    def __init__(self, sr: int, channels: int = 2,
+                 frame: int = 1024, hop: int = 256):
+        import numpy as _np
+        self.sr = int(sr)
+        self.ch = int(channels)
+        self.N = int(frame)
+        self.H = int(hop)
+        # Hann window. With hop = N/4, sum of overlapping windows is constant.
+        self.window = _np.hanning(self.N).astype(_np.float32)
+        # OLA normalisation factor for Hann at hop = N/4 ≈ 1.5.
+        # Empirically derived so a unit-amplitude sine comes back unit-amplitude.
+        self.norm = float(self.N) / (2.0 * self.H)
+
+        # Generous input ring buffer so we never have to refuse a grain even
+        # when pitch is shallow (pitch < 1 = read slower → input piles up).
+        self._in = _np.zeros((self.N * 16, self.ch), dtype=_np.float32)
+        self._in_size = self._in.shape[0]
+        self._in_w = 0          # monotonically increasing input sample counter
+        self._in_pos = 0.0      # next read start position (fractional)
+
+        # Output ring buffer holds OLA accumulator + the read cursor.
+        self._out = _np.zeros((self.N * 4, self.ch), dtype=_np.float32)
+        self._out_size = self._out.shape[0]
+        self._out_w = 0         # next grain placement position (in counter units)
+        self._out_r = 0         # next sample to deliver (in counter units)
+
+        self.pitch = 1.0
+        self._primed = False
+
+    def set_pitch_semitones(self, s: float):
+        self.pitch = 2.0 ** (float(s) / 12.0)
+
+    def reset(self):
+        self._in.fill(0); self._out.fill(0)
+        self._in_w = 0; self._in_pos = 0.0
+        self._out_w = 0; self._out_r = 0
+        self._primed = False
+
+    def _wrap_counters(self):
+        # Float precision on _in_pos degrades after a few minutes of operation
+        # — slide both counters down by a multiple of in_size periodically.
+        if self._in_w < self._in_size * 64:
+            return
+        floor = (self._in_w // self._in_size) * self._in_size
+        self._in_w -= floor
+        self._in_pos -= floor
+
+    def process(self, x: np.ndarray) -> np.ndarray:
+        """Process `x` of shape (n, channels). Returns (n, channels)."""
+        if abs(self.pitch - 1.0) < 0.005:
+            self._primed = False  # next non-bypass call should re-prime
+            return x.copy() if x.dtype == np.float32 else x.astype(np.float32)
+
+        n = x.shape[0]
+        if x.shape[1] != self.ch:
+            # Match channel count of our state
+            if x.shape[1] == 1 and self.ch == 2:
+                x = np.repeat(x, 2, axis=1)
+            elif x.shape[1] == 2 and self.ch == 1:
+                x = x.mean(axis=1, keepdims=True)
+
+        # On the first pitched pass, seed in_pos one frame behind the write
+        # head so we can immediately produce output instead of buffering N
+        # samples of silence into the start of the stream.
+        if not self._primed:
+            self._in_pos = max(0, self._in_w - self.N)
+            self._out_w  = self._out_r  # align write to read so OLA goes here
+            self._primed = True
+
+        # ── 1. Append input to ring buffer ──
+        idx = (self._in_w + np.arange(n)) % self._in_size
+        self._in[idx] = x
+        self._in_w += n
+
+        # ── 2. Produce grains as long as we have enough lookahead ──
+        # A grain reads up to `start + (N-1)*pitch + 1` samples (linear interp
+        # needs the sample after the last fractional position).
+        span = (self.N - 1) * self.pitch + 2
+        while self._in_pos + span <= self._in_w:
+            grain = self._read_grain(self._in_pos)
+            grain *= self.window[:, None]
+            self._add_to_output(self._out_w, grain)
+            self._out_w  += self.H
+            self._in_pos += self.H * self.pitch
+
+        # ── 3. Pull `n` samples from output (zeroing as we go) ──
+        out_idx = (self._out_r + np.arange(n)) % self._out_size
+        out = (self._out[out_idx] / self.norm).copy()
+        self._out[out_idx] = 0
+        self._out_r += n
+
+        self._wrap_counters()
+        return out.astype(np.float32)
+
+    # ─── internals ──────────────────────────────────────────────────────────
+    def _read_grain(self, start: float) -> np.ndarray:
+        """Read N output samples from the input buffer at step = `pitch` —
+        this is what actually shifts the pitch (vs. just relocating in time).
+        Linear interpolation handles the sub-sample steps."""
+        positions = start + np.arange(self.N, dtype=np.float64) * self.pitch
+        idx_lo = positions.astype(np.int64) % self._in_size
+        idx_hi = (idx_lo + 1) % self._in_size
+        frac = (positions - np.floor(positions)).astype(np.float32)
+        a = self._in[idx_lo]
+        b = self._in[idx_hi]
+        return a + (b - a) * frac[:, None]
+
+    def _add_to_output(self, start: int, grain: np.ndarray):
+        n = grain.shape[0]
+        end = start + n
+        # Fast path when the grain fits without wrapping.
+        s = start % self._out_size
+        if s + n <= self._out_size:
+            self._out[s:s + n] += grain
+        else:
+            head = self._out_size - s
+            self._out[s:] += grain[:head]
+            self._out[: n - head] += grain[head:]
+
+
 class LiveEffects:
     """Streaming effects chain — process(chunk) keeps per-effect state between
     calls so filters don't click and oscillators don't reset on every block.
@@ -316,10 +450,18 @@ class LiveEffects:
                            for d in self._ap_delays]
         self._ap_pos    = [0] * len(self._ap_delays)
 
+        # Streaming pitch shifter — frame/hop kept small so total added
+        # latency lands around 21 ms regardless of the block size the engine
+        # is running at.
+        self._pitch_shifter = StreamingPitchShifter(
+            sr=self.sr, channels=self.channels, frame=1024, hop=256)
+
     # ─── Public API ─────────────────────────────────────────────────────────
     def update_config(self, cfg: dict | None):
         with self._lock:
             new = dict(cfg or {})
+            ps = float(new.get("pitch_semitones") or 0.0)
+            self._pitch_shifter.set_pitch_semitones(ps)
             # Invalidate filter state if the cutoff changed — sosfilt_zi needs
             # to be recomputed for the new coefficients.
             if new.get("lowpass_hz") != self._lp_hz:
@@ -348,10 +490,13 @@ class LiveEffects:
                 chunk = np.repeat(chunk, 2, axis=1)
             elif chunk.shape[1] == 2 and self.channels == 1:
                 chunk = chunk.mean(axis=1, keepdims=True)
+        # Pitch shift always runs (it self-bypasses when pitch==1.0) so the
+        # ring buffer keeps tracking input. Otherwise toggling pitch on after
+        # silence would chop the first frame.
+        out = self._pitch_shifter.process(chunk)
         if not cfg:
-            return chunk
+            return out
 
-        out = chunk
         if cfg.get("telephone"):
             out = self._bp_step(out)
         if cfg.get("lowpass_hz"):
