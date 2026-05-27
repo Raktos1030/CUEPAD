@@ -89,6 +89,7 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
             verbose=False,
         )
 
+        _simplify_onnx_in_place(fp32_path, label="synth")
         _try_fp16_then_fp32(fp32_path, str(onnx_path))
     finally:
         try: os.unlink(fp32_path)
@@ -230,10 +231,41 @@ def export_contentvec_to_onnx(dest_path: str | Path,
             opset_version=17,
             do_constant_folding=True,
         )
+    _simplify_onnx_in_place(str(tmp), label="contentvec")
     tmp.replace(dest)
 
     if progress_cb:
         progress_cb(3, 3)
+
+
+def _simplify_onnx_in_place(onnx_path: str, label: str = "graph") -> None:
+    """Run onnx-simplifier over an exported graph in place. Fuses
+    constants, eliminates redundant Cast/Transpose chains, propagates
+    static shape inference. On failure, the original file is kept.
+    Each ONNX op is a DML kernel launch — fewer ops = lower per-chunk
+    overhead, which is the dominant cost on DirectML."""
+    try:
+        import onnx as _onnx
+        import onnxsim
+    except ImportError:
+        print(f"[VC] onnx-simplifier absent — {label} non simplifié. "
+              f"Installe : pip install onnx-simplifier", flush=True)
+        return
+    try:
+        model = _onnx.load(onnx_path)
+        before = len(model.graph.node)
+        simplified, ok = onnxsim.simplify(model)
+        if not ok:
+            print(f"[VC] {label}: onnxsim verification failed — "
+                  f"keeping original ({before} nodes)", flush=True)
+            return
+        after = len(simplified.graph.node)
+        _onnx.save(simplified, onnx_path)
+        print(f"[VC] {label} simplified: {before} → {after} nodes",
+              flush=True)
+    except Exception as e:
+        print(f"[VC] {label} simplify error ({type(e).__name__}: {e}) — "
+              f"keeping original", flush=True)
 
 
 def _providers_for(device_label: str) -> list:

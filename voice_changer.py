@@ -456,17 +456,17 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # Export the synth once per voice + cache on disk. v4 bumps the
-        # cache key for the FP16-with-NSF-blocklist conversion path;
-        # plain v3 files exported before the blocklist exist but fail to
-        # load (Type mismatch on NSF Cast nodes).
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v4.onnx"
+        # Export the synth once per voice + cache on disk. v5 bumps the
+        # cache key for the onnxsim simplification pass — fewer ops on
+        # disk means fewer DML kernel launches at runtime.
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v5.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.
         # We bake it locally from the same HubertModel weights the torch
         # path uses; reuse the HF cache so the weights aren't pulled twice.
-        cvec_onnx = self.base_dir / "vec-768-layer-12.onnx"
+        # .v2 suffix bumps the cache for the onnxsim pass added in v5 synth.
+        cvec_onnx = self.base_dir / "vec-768-layer-12.v2.onnx"
         if not cvec_onnx.exists() or cvec_onnx.stat().st_size < 100_000_000:
             export_contentvec_to_onnx(cvec_onnx, cache_dir=str(self.hf_cache_dir))
 

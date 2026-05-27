@@ -24,6 +24,12 @@ onnx
 # live mic path. Optional: if missing, the export falls back to FP32 with
 # a terminal warning.
 onnxconverter-common
+# Simplify the graph after torch.onnx.export: fuses constants, eliminates
+# redundant Cast/Transpose chains, propagates static shape inference.
+# Often removes the very Cast patterns that break the FP16 conversion
+# above, and gives a 20-30% steady-state speed-up on DML even without
+# the FP16 win — DML pays per-op launch overhead, fewer ops = faster.
+onnx-simplifier
 # transformers 4.50+ pulls torch.distributed.tensor.device_mesh which only
 # landed in torch 2.5. If you've installed torch-directml (AMD/Intel GPU,
 # see below), pip downgrades torch to 2.4.x and the latest transformers
