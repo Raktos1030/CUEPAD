@@ -99,32 +99,17 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
 def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     """Synth-specific wrapper around the generic mixed-precision pass.
 
-    Routes through the static converter with two blocks:
-     - op_block_list=['Cast'] so HuBERT-style attention scaling Casts
-       and any other explicit Cast stay FP32.
-     - node_block_list = every node whose name contains 'm_source' so
-       the NSF source generator stays entirely FP32. The NSF uses
-       Resize ops on Constant FP32 sine tables; the Resize op family
-       has no FP16 implementation in ORT, and any conversion that
-       leaves its input/output mismatched fails to load.
-
-    Everything else (encoder, flow, decoder HiFi-GAN-style upsampling
-    convolutions — the bulk of the compute) gets FP16 unconditionally.
-    Smoke-tested in the helper; falls back to FP32 if ORT still
-    rejects."""
+    op_block_list approach: block by op TYPE rather than by 127-node
+    name list. The earlier attempt to enumerate every node under
+    `/dec/m_source/` and pass it to convert_float_to_float16's
+    node_block_list caused the converter to hang (likely O(N²) or
+    pathological shape-inference behaviour with a large blocklist).
+    Cast covers HuBERT-style attention scaling + the m_source casts;
+    Resize is the actual NSF op that has no FP16 kernel in ORT and
+    was the specific load failure in 2.7.5. Other NSF ops (Slice, Pad,
+    Constant) all have FP16 kernels — if any of them now break the
+    load anyway, the smoke-test gate falls back to FP32."""
     import numpy as _np
-    try:
-        import onnx as _onnx
-    except ImportError:
-        # No onnx → can't compute the NSF node list. The helper will
-        # itself fall back to FP32 when its own onnx import fails.
-        nsf_nodes = []
-    else:
-        nsf_nodes = [
-            n.name for n in _onnx.load(fp32_path).graph.node
-            if 'm_source' in n.name
-        ]
-
     T = 64
     feed = {
         'phone':         _np.random.randn(1, T, 768).astype(_np.float32),
@@ -136,8 +121,7 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     }
     _try_fp16_then_fp32_with_feed(
         src_fp32=fp32_path, dst=final_path, feed=feed, label="synth",
-        op_block_list=["Cast"],
-        node_block_list=nsf_nodes,
+        op_block_list=["Cast", "Resize"],
     )
 
 
@@ -236,13 +220,18 @@ def _try_static_fp16_then_fp32(src_fp32: str, dst: str,
         node_hint = f", {node_count} nodes" if node_count else ""
         print(f"[VC] {label} static-FP16 (op_block={op_block_list}"
               f"{node_hint})…", flush=True)
+        # disable_shape_infer=True: convert_float_to_float16's internal
+        # shape-inference pass hangs on large graphs with many blocked
+        # nodes (the synth at 1253 nodes with the NSF subgraph blocked
+        # was stuck for 5+ min). ORT reruns shape inference at session
+        # load anyway, so we lose nothing functional here.
         converted = ocnn_fp16.convert_float_to_float16(
             model_proto,
             keep_io_types=True,
             op_block_list=op_block_list,
             node_block_list=node_block_list or [],
             max_finite_val=65504.0,
-            disable_shape_infer=False,
+            disable_shape_infer=True,
         )
         tmp_path = dst + ".tmp.fp16.onnx"
         _onnx.save(converted, tmp_path)

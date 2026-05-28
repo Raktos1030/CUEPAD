@@ -456,12 +456,12 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # v8 bumps for NSF (m_source) node_block_list — v7's op_block=['Cast']
-        # alone wasn't enough, the NSF source generator's Resize op has no
-        # FP16 implementation in ORT, model failed to load and fell back to
-        # FP32. Adding the whole NSF subgraph to node_block_list keeps it in
-        # FP32 while the rest (encoder, flow, decoder) goes FP16.
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v8.onnx"
+        # v9 — block by op TYPE (Cast + Resize) instead of by name. The
+        # v8 attempt to pass 127 m_source node names through
+        # node_block_list froze the converter, probably O(N²) interaction
+        # with internal shape inference. Op-type blocks short-circuit
+        # cleanly inside the converter.
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v9.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.
