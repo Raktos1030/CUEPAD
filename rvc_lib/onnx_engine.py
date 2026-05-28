@@ -100,25 +100,42 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     """Synth-specific wrapper around the generic mixed-precision pass.
 
     Routes through `auto_convert_mixed_precision` (no op/node blocklist).
-    The static `convert_float_to_float16` path hangs indefinitely on the
-    synth graph (~1253 nodes) regardless of shape-infer setting or
-    blocklist size — tried it three ways (full NSF node list, then
-    ['Cast','Resize'] op types, then disable_shape_infer) and every
-    variant froze. The auto path is slower (bisection, 2-5 min) but it
-    COMPLETES on this graph — it's what produced the working FP16 synth
-    in 2.7.0 — and it prints `Running attempt N…` so the export is
-    visibly alive rather than apparently hung. Output stays within
-    rtol/atol of the FP32 reference, so it's also the safest for audio
-    quality."""
+
+    The static `convert_float_to_float16` path is a confirmed dead-end
+    for the synth — reproduced exhaustively against the real
+    architecture (random weights, no .pth needed):
+      * op_block_list=['Cast'] alone: converts in 0.6 s but the model
+        fails ORT load — Resize's `scales` input gets FP16'd (Resize
+        needs it FP32).
+      * adding Resize / NSF to the block list: triggers an infinite
+        cast-insertion cascade inside process_node_in_block_list (it
+        appends Cast nodes to graph.node while iterating it, and those
+        Casts are themselves blocked → more Casts → hang). A snapshot
+        patch stops the hang, but then ORT load fails on a parade of
+        boundary type-mismatches (RandomUniformLike, Equal, Div, …):
+        the static converter just doesn't insert FP16↔FP32 bridge
+        Casts correctly across this graph's many subgraph boundaries.
+    auto_convert sidesteps all of it: it converts whole node subsets
+    and validates the output against an FP32 reference, backing off
+    where FP16 diverges, so the casts it inserts are always consistent.
+    Slower (bisection, 2-5 min) but it COMPLETES, prints `Running
+    attempt N…` so it's visibly alive, and is the safest for audio
+    quality. This is what produced the working FP16 synth in 2.7.0.
+
+    Use a local RandomState (seed 0) for the validation feed so the
+    resulting mixed-precision graph is reproducible across exports —
+    without touching the global numpy RNG (the live path's per-chunk
+    `rnd` noise must stay random)."""
     import numpy as _np
+    rng = _np.random.RandomState(0)
     T = 64
     feed = {
-        'phone':         _np.random.randn(1, T, 768).astype(_np.float32),
+        'phone':         rng.randn(1, T, 768).astype(_np.float32),
         'phone_lengths': _np.array([T], dtype=_np.int64),
-        'pitch':         _np.random.randint(5, 255, size=(1, T)).astype(_np.int64),
-        'pitchf':        _np.random.uniform(50, 500, size=(1, T)).astype(_np.float32),
+        'pitch':         rng.randint(5, 255, size=(1, T)).astype(_np.int64),
+        'pitchf':        rng.uniform(50, 500, size=(1, T)).astype(_np.float32),
         'ds':            _np.array([0], dtype=_np.int64),
-        'rnd':           _np.random.randn(1, 192, T).astype(_np.float32),
+        'rnd':           rng.randn(1, 192, T).astype(_np.float32),
     }
     _try_fp16_then_fp32_with_feed(
         src_fp32=fp32_path, dst=final_path, feed=feed, label="synth",
@@ -343,7 +360,7 @@ def export_contentvec_to_onnx(dest_path: str | Path,
     # so the validator sees realistic activations, not noise.
     import numpy as _np
     cvec_feed = {
-        "source": (_np.random.randn(1, 1, 16000) * 0.1).astype(_np.float32),
+        "source": (_np.random.RandomState(0).randn(1, 1, 16000) * 0.1).astype(_np.float32),
     }
     try:
         # HuBERT's self-attention has explicit Cast nodes for softmax
