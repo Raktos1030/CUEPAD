@@ -456,12 +456,10 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # v9 — block by op TYPE (Cast + Resize) instead of by name. The
-        # v8 attempt to pass 127 m_source node names through
-        # node_block_list froze the converter, probably O(N²) interaction
-        # with internal shape inference. Op-type blocks short-circuit
-        # cleanly inside the converter.
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v9.onnx"
+        # v10 — back to auto_convert_mixed_precision (the static converter
+        # hangs on the synth graph no matter the blocklist/shape-infer
+        # settings; auto is slower but completes, as it did in 2.7.0).
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v10.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.

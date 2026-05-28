@@ -99,16 +99,17 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
 def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     """Synth-specific wrapper around the generic mixed-precision pass.
 
-    op_block_list approach: block by op TYPE rather than by 127-node
-    name list. The earlier attempt to enumerate every node under
-    `/dec/m_source/` and pass it to convert_float_to_float16's
-    node_block_list caused the converter to hang (likely O(N²) or
-    pathological shape-inference behaviour with a large blocklist).
-    Cast covers HuBERT-style attention scaling + the m_source casts;
-    Resize is the actual NSF op that has no FP16 kernel in ORT and
-    was the specific load failure in 2.7.5. Other NSF ops (Slice, Pad,
-    Constant) all have FP16 kernels — if any of them now break the
-    load anyway, the smoke-test gate falls back to FP32."""
+    Routes through `auto_convert_mixed_precision` (no op/node blocklist).
+    The static `convert_float_to_float16` path hangs indefinitely on the
+    synth graph (~1253 nodes) regardless of shape-infer setting or
+    blocklist size — tried it three ways (full NSF node list, then
+    ['Cast','Resize'] op types, then disable_shape_infer) and every
+    variant froze. The auto path is slower (bisection, 2-5 min) but it
+    COMPLETES on this graph — it's what produced the working FP16 synth
+    in 2.7.0 — and it prints `Running attempt N…` so the export is
+    visibly alive rather than apparently hung. Output stays within
+    rtol/atol of the FP32 reference, so it's also the safest for audio
+    quality."""
     import numpy as _np
     T = 64
     feed = {
@@ -121,7 +122,6 @@ def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
     }
     _try_fp16_then_fp32_with_feed(
         src_fp32=fp32_path, dst=final_path, feed=feed, label="synth",
-        op_block_list=["Cast", "Resize"],
     )
 
 
