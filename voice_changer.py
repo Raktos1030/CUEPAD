@@ -456,14 +456,17 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # v11 — synth ships FP32-simplified directly, no FP16 attempt.
-        # Reproduced that BOTH converters choke on the NSF source
-        # generator's ops (Resize/Cast/Random/Mod), so every prior
-        # version silently fell back to FP32 after wasting 2-5 min. Skip
-        # the doomed attempt → export is now seconds, same runtime model.
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v11.onnx"
-        if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
-            export_synth_to_onnx(pth_path, onnx_synth)
+        # v12 — split synth: prep (FP32, encoder+flow+NSF, frame-rate) +
+        # decoder (FP16, HiFi-GAN convs, audio-rate). The decoder is the
+        # heavy part and is pure-conv so it FP16's cleanly (the NSF that
+        # blocked whole-synth FP16 lives in prep, kept FP32). Two files;
+        # both must exist or we re-export.
+        vdir = self.voices_dir / voice_name
+        onnx_prep = vdir / f"{voice_name}.v12.prep.onnx"
+        onnx_dec  = vdir / f"{voice_name}.v12.dec.onnx"
+        if (not onnx_prep.exists() or onnx_prep.stat().st_size < 500_000
+                or not onnx_dec.exists() or onnx_dec.stat().st_size < 500_000):
+            export_synth_to_onnx(pth_path, onnx_prep, onnx_dec)
         # ContentVec ONNX is shared across voices — keep one copy in _base.
         # We bake it locally from the same HubertModel weights the torch
         # path uses; reuse the HF cache so the weights aren't pulled twice.
@@ -482,7 +485,7 @@ class VoiceChanger:
             except (ValueError, IndexError): dml_idx = 0
 
         self._onnx_session = OnnxRvcSession(
-            synth_onnx=onnx_synth, contentvec_onnx=cvec_onnx,
+            prep_onnx=onnx_prep, dec_onnx=onnx_dec, contentvec_onnx=cvec_onnx,
             providers=providers, dml_device_index=dml_idx,
         )
         # Confirm DML actually engaged — if onnxruntime fell back to CPU,

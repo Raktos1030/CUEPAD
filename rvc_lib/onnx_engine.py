@@ -34,18 +34,37 @@ import numpy as np
 CONTENTVEC_HF_MODEL = "lengyue233/content-vec-best"
 
 
-def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
-    """Convert an RVC .pth into an ONNX graph that ContentVec features +
-    pitch + speaker id can be piped through. One-shot, cached on disk.
-    Post-processes the graph to FP16 internally when onnxconverter_common
-    is available — IO stays FP32 so callers see no change, but RDNA3 /
-    Ampere+ run the inner conv/matmul stack ~1.5-2× faster."""
-    import os, shutil, tempfile
+def export_synth_to_onnx(pth_path: str | Path,
+                         prep_path: str | Path,
+                         dec_path: str | Path) -> None:
+    """Convert an RVC .pth into a SPLIT pair of ONNX graphs, cached on disk:
+
+      * prep_path  — encoder + flow + NSF source generator, FP32.
+        (phone, phone_lengths, pitch, pitchf, ds, rnd) → (dec_in, har, g)
+        Runs at frame-rate (T≈70), so it's the light part. Stays FP32
+        because it's riddled with ops onnxconverter_common can't
+        mixed-precision (HuBERT-style attention Cast/Equal in enc_p;
+        Resize/Cast/RandomUniformLike/Mod in the NSF SineGen).
+
+      * dec_path   — the HiFi-GAN-style decoder, FP16.
+        (dec_in, har, g) → audio
+        Runs at audio-rate (T×480 samples), so it's the HEAVY part
+        (~the whole synth cost). It's pure Conv/ConvTranspose/ResBlock —
+        no NSF, no attention — so convert_float_to_float16 converts it
+        cleanly (verified: loads in ORT, FP16 vs FP32 max rel diff
+        0.0004, size halved). This is where the speedup lives.
+
+    Splitting at the (dec_in, har, g) tensor boundary keeps every original
+    op in ONNX (no Python re-implementation of the NSF → no numerical
+    parity risk); it just relocates the FP32/FP16 cut to a clean seam the
+    converter can't mess up."""
+    import os, tempfile
     import torch
+    import torch.nn.functional as F
     from rvc_lib.models_onnx import SynthesizerTrnMsNSFsidM
+    import rvc_lib.modules as _modules
 
     cpt = torch.load(str(pth_path), map_location="cpu", weights_only=False)
-    # n_spk slot in the config tuple comes from the embedding table.
     cpt["config"][-3] = cpt["weight"]["emb_g.weight"].shape[0]
     version = cpt.get("version", "v1")
     if version != "v2":
@@ -54,69 +73,96 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
             "Réentraîne ou convertis en v2."
         )
 
-    # Dummy inputs with dynamic time axes so the exported graph accepts
-    # any-length chunks at runtime.
-    test_phone   = torch.rand(1, 200, 768)
-    test_phlen   = torch.tensor([200]).long()
-    test_pitch   = torch.randint(size=(1, 200), low=5, high=255)
-    test_pitchf  = torch.rand(1, 200)
-    test_ds      = torch.LongTensor([0])
-    test_rnd     = torch.rand(1, 192, 200)
-
     net = SynthesizerTrnMsNSFsidM(*cpt["config"], is_half=False, version=version)
     net.load_state_dict(cpt["weight"], strict=False)
     net.eval()
 
-    # Stage to a temp path so a failed FP16 conversion still leaves the
-    # FP32 graph available to fall back to.
-    fp32_fd, fp32_path = tempfile.mkstemp(suffix=".onnx")
-    os.close(fp32_fd)
+    class _PrepNet(torch.nn.Module):
+        """SynthesizerTrnMsNSFsidM.forward up to (but excluding) the
+        decoder convs — emits the decoder's three inputs."""
+        def __init__(self, s):
+            super().__init__()
+            self.s = s
+        def forward(self, phone, phone_lengths, pitch, pitchf, ds, rnd):
+            s = self.s
+            g = s.emb_g(ds.unsqueeze(0)).transpose(1, 2)
+            m_p, logs_p, x_mask = s.enc_p(phone, pitch, phone_lengths)
+            z_p = (m_p + torch.exp(logs_p) * rnd) * x_mask
+            z = s.flow(z_p, x_mask, g=g, reverse=True)
+            dec_in = z * x_mask
+            har, _, _ = s.dec.m_source(pitchf, s.dec.upp)
+            har = har.transpose(1, 2)
+            return dec_in, har, g
+
+    class _DecNet(torch.nn.Module):
+        """GeneratorNSF.forward with har_source as an input (NSF removed)."""
+        def __init__(self, dec):
+            super().__init__()
+            self.dec = dec
+        def forward(self, x, har, g):
+            d = self.dec
+            x = d.conv_pre(x)
+            x = x + d.cond(g)
+            for i in range(d.num_upsamples):
+                x = F.leaky_relu(x, _modules.LRELU_SLOPE)
+                x = d.ups[i](x)
+                x_source = d.noise_convs[i](har)
+                x = x + x_source
+                xs = None
+                for j in range(d.num_kernels):
+                    rb = d.resblocks[i * d.num_kernels + j]
+                    xs = rb(x) if xs is None else xs + rb(x)
+                x = xs / d.num_kernels
+            x = F.leaky_relu(x)
+            x = d.conv_post(x)
+            return torch.tanh(x)
+
+    prep = _PrepNet(net).eval()
+    dec = _DecNet(net.dec).eval()
+
+    # Dummy run of prep to get real-shaped decoder inputs for the dec export.
+    T = 200
+    d_phone  = torch.rand(1, T, 768)
+    d_phlen  = torch.tensor([T]).long()
+    d_pitch  = torch.randint(size=(1, T), low=5, high=255)
+    d_pitchf = torch.rand(1, T) * 200 + 100
+    d_ds     = torch.LongTensor([0])
+    d_rnd    = torch.rand(1, 192, T)
+    with torch.no_grad():
+        d_decin, d_har, d_g = prep(d_phone, d_phlen, d_pitch, d_pitchf, d_ds, d_rnd)
+
+    # ── prep graph (FP32) ──────────────────────────────────────────────
+    torch.onnx.export(
+        prep, (d_phone, d_phlen, d_pitch, d_pitchf, d_ds, d_rnd), str(prep_path),
+        input_names=["phone", "phone_lengths", "pitch", "pitchf", "ds", "rnd"],
+        output_names=["dec_in", "har", "g"],
+        dynamic_axes={"phone": [1], "pitch": [1], "pitchf": [1], "rnd": [2],
+                      "dec_in": {2: "t"}, "har": {2: "tf"}},
+        do_constant_folding=True, opset_version=17, verbose=False,
+    )
+    _simplify_onnx_in_place(str(prep_path), label="synth-prep")
+    _sz = Path(prep_path).stat().st_size // (1024 * 1024)
+    print(f"[VC] synth-prep ONNX saved FP32 — {_sz} MB", flush=True)
+
+    # ── decoder graph (FP16) ───────────────────────────────────────────
+    dec_fd, dec_fp32 = tempfile.mkstemp(suffix=".onnx")
+    os.close(dec_fd)
     try:
         torch.onnx.export(
-            net,
-            (test_phone, test_phlen, test_pitch, test_pitchf, test_ds, test_rnd),
-            fp32_path,
-            input_names=["phone", "phone_lengths", "pitch", "pitchf", "ds", "rnd"],
-            output_names=["audio"],
-            dynamic_axes={
-                "phone":  [1],
-                "pitch":  [1],
-                "pitchf": [1],
-                "rnd":    [2],
-            },
-            do_constant_folding=True,
-            opset_version=17,
-            verbose=False,
+            dec, (d_decin, d_har, d_g), dec_fp32,
+            input_names=["dec_in", "har", "g"], output_names=["audio"],
+            dynamic_axes={"dec_in": {2: "t"}, "har": {2: "tf"}, "audio": {2: "ta"}},
+            do_constant_folding=True, opset_version=17, verbose=False,
         )
-
-        _simplify_onnx_in_place(fp32_path, label="synth")
-        # Synth ships FP32 (simplified), NOT FP16. Confirmed by reproducing
-        # the conversion against the real architecture: the NSF source
-        # generator (SineGen / l_sin_gen) is built from ops that
-        # onnxconverter_common cannot mixed-precision on this graph —
-        # F.interpolate→Resize (scales must stay FP32), a `< 0` bool
-        # comparison→Cast, torch.rand/randn_like→RandomUniform/NormalLike,
-        # `% 1`→Mod. BOTH conversion paths choke on it:
-        #   - static convert_float_to_float16: ORT rejects the model at
-        #     load (Resize/Cast/Div/Equal FP16↔FP32 boundary mismatches),
-        #     and blocking 'Cast' triggers an infinite cast-insertion
-        #     cascade (it appends Casts to graph.node while iterating it).
-        #   - auto_convert_mixed_precision: raises inside its own
-        #     validation on the same NSF Cast, and clamps the 40000 Hz
-        #     sample-rate constant to 10000 (default max_finite_val=1e4).
-        # Every prior version silently fell back to FP32 after wasting
-        # 2-5 min on the doomed auto attempt — so we skip it entirely and
-        # save the simplified FP32 directly (export drops from minutes to
-        # seconds, identical runtime model). Real synth FP16 needs source
-        # surgery: precompute the NSF excitation in Python and feed it as
-        # a decoder input so the exported graph has no NSF ops. Deferred.
-        import shutil as _shutil
-        _shutil.copy2(fp32_path, str(onnx_path))
-        _sz = Path(onnx_path).stat().st_size // (1024 * 1024)
-        print(f"[VC] synth ONNX saved FP32-simplified — {_sz} MB "
-              f"(FP16 blocked by NSF ops, see onnx_engine.py)", flush=True)
+        _simplify_onnx_in_place(dec_fp32, label="synth-dec")
+        # Pure-conv decoder → no NSF/attention → static FP16 converts
+        # cleanly and fast. Empty op_block_list (nothing to dodge); the
+        # smoke-test gate still falls back to FP32 if a future model
+        # surprises us.
+        _try_static_fp16_then_fp32(dec_fp32, str(dec_path),
+                                   op_block_list=[], label="synth-dec")
     finally:
-        try: os.unlink(fp32_path)
+        try: os.unlink(dec_fp32)
         except OSError: pass
 
 
@@ -400,10 +446,11 @@ def _providers_for(device_label: str) -> list:
 
 
 class OnnxRvcSession:
-    """Loaded synth ONNX + ContentVec ONNX, exposed with the same call
-    shape the rest of the pipeline expects."""
+    """Loaded split-synth (prep FP32 + decoder FP16) + ContentVec ONNX,
+    exposed with the same call shape the rest of the pipeline expects."""
 
-    def __init__(self, synth_onnx: str | Path, contentvec_onnx: str | Path,
+    def __init__(self, prep_onnx: str | Path, dec_onnx: str | Path,
+                 contentvec_onnx: str | Path,
                  providers: list, dml_device_index: int | None = None):
         try:
             import onnxruntime as ort
@@ -436,21 +483,21 @@ class OnnxRvcSession:
             sess_options.enable_cpu_mem_arena = False
             sess_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
 
-        # Synthesizer.
-        self.synth = ort.InferenceSession(
-            str(synth_onnx),
-            sess_options=sess_options,
-            providers=providers, provider_options=provider_options,
-        )
+        def _sess(path):
+            return ort.InferenceSession(
+                str(path), sess_options=sess_options,
+                providers=providers, provider_options=provider_options,
+            )
+
+        # Synth, split: prep (FP32, frame-rate) → decoder (FP16, audio-rate).
+        self.prep = _sess(prep_onnx)
+        self.dec = _sess(dec_onnx)
         # ContentVec / HuBERT.
-        self.cvec = ort.InferenceSession(
-            str(contentvec_onnx),
-            sess_options=sess_options,
-            providers=providers, provider_options=provider_options,
-        )
-        self._synth_input_names = [i.name for i in self.synth.get_inputs()]
+        self.cvec = _sess(contentvec_onnx)
+        self._prep_input_names = [i.name for i in self.prep.get_inputs()]
+        self._dec_input_names = [i.name for i in self.dec.get_inputs()]
         self._cvec_input_name = self.cvec.get_inputs()[0].name
-        self.active_providers = self.synth.get_providers()
+        self.active_providers = self.prep.get_providers()
 
     def warmup_for_chunk_ms(self, chunk_ms: int) -> None:
         """Pre-trigger DML shader compilation at the exact (T_cvec, T_synth)
@@ -467,8 +514,10 @@ class OnnxRvcSession:
         })
         dt_cvec = (time.monotonic() - t0) * 1000.0
 
+        # prep (FP32) at the real shape; its outputs feed the dec warmup so
+        # the dec compiles its kernels at the exact audio-rate length too.
         t1 = time.monotonic()
-        feed = dict(zip(self._synth_input_names, [
+        prep_feed = dict(zip(self._prep_input_names, [
             np.zeros((1, t_synth, 768), dtype=np.float32),  # phone
             np.array([t_synth],          dtype=np.int64),    # phone_lengths
             np.zeros((1, t_synth),       dtype=np.int64),    # pitch
@@ -476,11 +525,15 @@ class OnnxRvcSession:
             np.array([0],                dtype=np.int64),    # ds
             np.zeros((1, 192, t_synth),  dtype=np.float32),  # rnd
         ]))
-        self.synth.run(None, feed)
-        dt_synth = (time.monotonic() - t1) * 1000.0
+        dec_in, har, g = self.prep.run(None, prep_feed)
+        dt_prep = (time.monotonic() - t1) * 1000.0
+
+        t2 = time.monotonic()
+        self.dec.run(None, dict(zip(self._dec_input_names, [dec_in, har, g])))
+        dt_dec = (time.monotonic() - t2) * 1000.0
         print(f"[VC] ONNX warmup @T_synth={t_synth} "
               f"(chunk={chunk_ms}ms): cvec {dt_cvec:.0f}ms · "
-              f"synth {dt_synth:.0f}ms", flush=True)
+              f"prep {dt_prep:.0f}ms · dec {dt_dec:.0f}ms", flush=True)
 
     def extract_features(self, audio_16k: np.ndarray) -> np.ndarray:
         """Run the ContentVec ONNX over mono 16 kHz audio. Returns
@@ -499,11 +552,16 @@ class OnnxRvcSession:
     def infer(self, phone: np.ndarray, phone_lengths: np.ndarray,
               pitch: np.ndarray, pitchf: np.ndarray,
               ds: np.ndarray, rnd: np.ndarray) -> np.ndarray:
-        feed = dict(zip(
-            self._synth_input_names,
+        # Stage 1: prep (FP32) → decoder inputs.
+        prep_feed = dict(zip(
+            self._prep_input_names,
             [phone, phone_lengths, pitch, pitchf, ds, rnd],
         ))
-        audio = self.synth.run(None, feed)[0]
+        dec_in, har, g = self.prep.run(None, prep_feed)
+        # Stage 2: decoder (FP16) → audio. IO stays FP32 (keep_io_types),
+        # so no manual dtype juggling needed at the boundary.
+        dec_feed = dict(zip(self._dec_input_names, [dec_in, har, g]))
+        audio = self.dec.run(None, dec_feed)[0]
         # ONNX synth returns float in [-1,1]; convert to int16-style scale
         # so downstream code that divides by 32768 still produces float.
         return (audio * 32767.0).astype(np.int16)
