@@ -456,10 +456,12 @@ class VoiceChanger:
             export_synth_to_onnx, export_contentvec_to_onnx,
             OnnxRvcSession, _providers_for,
         )
-        # v10 — back to auto_convert_mixed_precision (the static converter
-        # hangs on the synth graph no matter the blocklist/shape-infer
-        # settings; auto is slower but completes, as it did in 2.7.0).
-        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v10.onnx"
+        # v11 — synth ships FP32-simplified directly, no FP16 attempt.
+        # Reproduced that BOTH converters choke on the NSF source
+        # generator's ops (Resize/Cast/Random/Mod), so every prior
+        # version silently fell back to FP32 after wasting 2-5 min. Skip
+        # the doomed attempt → export is now seconds, same runtime model.
+        onnx_synth = self.voices_dir / voice_name / f"{voice_name}.v11.onnx"
         if not onnx_synth.exists() or onnx_synth.stat().st_size < 1_000_000:
             export_synth_to_onnx(pth_path, onnx_synth)
         # ContentVec ONNX is shared across voices — keep one copy in _base.

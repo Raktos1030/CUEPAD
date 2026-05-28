@@ -90,56 +90,34 @@ def export_synth_to_onnx(pth_path: str | Path, onnx_path: str | Path) -> None:
         )
 
         _simplify_onnx_in_place(fp32_path, label="synth")
-        _try_fp16_then_fp32(fp32_path, str(onnx_path))
+        # Synth ships FP32 (simplified), NOT FP16. Confirmed by reproducing
+        # the conversion against the real architecture: the NSF source
+        # generator (SineGen / l_sin_gen) is built from ops that
+        # onnxconverter_common cannot mixed-precision on this graph —
+        # F.interpolate→Resize (scales must stay FP32), a `< 0` bool
+        # comparison→Cast, torch.rand/randn_like→RandomUniform/NormalLike,
+        # `% 1`→Mod. BOTH conversion paths choke on it:
+        #   - static convert_float_to_float16: ORT rejects the model at
+        #     load (Resize/Cast/Div/Equal FP16↔FP32 boundary mismatches),
+        #     and blocking 'Cast' triggers an infinite cast-insertion
+        #     cascade (it appends Casts to graph.node while iterating it).
+        #   - auto_convert_mixed_precision: raises inside its own
+        #     validation on the same NSF Cast, and clamps the 40000 Hz
+        #     sample-rate constant to 10000 (default max_finite_val=1e4).
+        # Every prior version silently fell back to FP32 after wasting
+        # 2-5 min on the doomed auto attempt — so we skip it entirely and
+        # save the simplified FP32 directly (export drops from minutes to
+        # seconds, identical runtime model). Real synth FP16 needs source
+        # surgery: precompute the NSF excitation in Python and feed it as
+        # a decoder input so the exported graph has no NSF ops. Deferred.
+        import shutil as _shutil
+        _shutil.copy2(fp32_path, str(onnx_path))
+        _sz = Path(onnx_path).stat().st_size // (1024 * 1024)
+        print(f"[VC] synth ONNX saved FP32-simplified — {_sz} MB "
+              f"(FP16 blocked by NSF ops, see onnx_engine.py)", flush=True)
     finally:
         try: os.unlink(fp32_path)
         except OSError: pass
-
-
-def _try_fp16_then_fp32(fp32_path: str, final_path: str) -> None:
-    """Synth-specific wrapper around the generic mixed-precision pass.
-
-    Routes through `auto_convert_mixed_precision` (no op/node blocklist).
-
-    The static `convert_float_to_float16` path is a confirmed dead-end
-    for the synth — reproduced exhaustively against the real
-    architecture (random weights, no .pth needed):
-      * op_block_list=['Cast'] alone: converts in 0.6 s but the model
-        fails ORT load — Resize's `scales` input gets FP16'd (Resize
-        needs it FP32).
-      * adding Resize / NSF to the block list: triggers an infinite
-        cast-insertion cascade inside process_node_in_block_list (it
-        appends Cast nodes to graph.node while iterating it, and those
-        Casts are themselves blocked → more Casts → hang). A snapshot
-        patch stops the hang, but then ORT load fails on a parade of
-        boundary type-mismatches (RandomUniformLike, Equal, Div, …):
-        the static converter just doesn't insert FP16↔FP32 bridge
-        Casts correctly across this graph's many subgraph boundaries.
-    auto_convert sidesteps all of it: it converts whole node subsets
-    and validates the output against an FP32 reference, backing off
-    where FP16 diverges, so the casts it inserts are always consistent.
-    Slower (bisection, 2-5 min) but it COMPLETES, prints `Running
-    attempt N…` so it's visibly alive, and is the safest for audio
-    quality. This is what produced the working FP16 synth in 2.7.0.
-
-    Use a local RandomState (seed 0) for the validation feed so the
-    resulting mixed-precision graph is reproducible across exports —
-    without touching the global numpy RNG (the live path's per-chunk
-    `rnd` noise must stay random)."""
-    import numpy as _np
-    rng = _np.random.RandomState(0)
-    T = 64
-    feed = {
-        'phone':         rng.randn(1, T, 768).astype(_np.float32),
-        'phone_lengths': _np.array([T], dtype=_np.int64),
-        'pitch':         rng.randint(5, 255, size=(1, T)).astype(_np.int64),
-        'pitchf':        rng.uniform(50, 500, size=(1, T)).astype(_np.float32),
-        'ds':            _np.array([0], dtype=_np.int64),
-        'rnd':           rng.randn(1, 192, T).astype(_np.float32),
-    }
-    _try_fp16_then_fp32_with_feed(
-        src_fp32=fp32_path, dst=final_path, feed=feed, label="synth",
-    )
 
 
 def _try_fp16_then_fp32_with_feed(src_fp32: str, dst: str,
