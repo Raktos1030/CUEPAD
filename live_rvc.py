@@ -166,6 +166,7 @@ class LiveRvcEngine:
         self._underruns = 0
         self._chunk_count = 0
         self._avg_infer_ms = 0.0
+        self._dropped_samples = 0
         self._started_ts: Optional[float] = None
         self._last_error: Optional[str] = None
 
@@ -180,6 +181,7 @@ class LiveRvcEngine:
             "underruns":     self._underruns,
             "chunks":        self._chunk_count,
             "avg_infer_ms":  round(self._avg_infer_ms, 1),
+            "dropped_ms":    round(self._dropped_samples * 1000.0 / self.SR_IN, 0),
             "uptime_sec":    round(time.monotonic() - self._started_ts, 1) if self._started_ts else 0.0,
             "error":         self._last_error,
             "tgt_sr":        self.vc.streaming_target_sr(),
@@ -256,6 +258,7 @@ class LiveRvcEngine:
         self._underruns = 0
         self._chunk_count = 0
         self._avg_infer_ms = 0.0
+        self._dropped_samples = 0
         self._last_error = None
 
         # 2. Audio callback: resample mic → 16 kHz → in_ring,
@@ -341,12 +344,27 @@ class LiveRvcEngine:
         # The worker needs (chunk + crossfade) samples available before it
         # can run a pass — the tail provides context for the NEXT chunk.
         needed = chunk_n + cf_n_in
+        # When inference can't quite keep up (infer_ms ≳ chunk_ms, common on
+        # DML), the mic fills the in-ring faster than the worker drains it.
+        # Without intervention the worker keeps processing ever-staler audio
+        # and end-to-end latency grows without bound (the 3 s "echo"). Cap
+        # it: if the backlog exceeds what we need plus a small jitter slack,
+        # drop the oldest samples so we always convert the FRESHEST chunk.
+        # Trades a rare input skip for bounded, real-time latency — the
+        # w-okada behaviour. Slack = half a chunk absorbs normal jitter so
+        # the MOY sweet spot (infer ≈ chunk) doesn't drop every pass.
+        max_backlog = needed + chunk_n // 2
 
         while not self._stop.is_set():
             if self._in_ring is None or self._out_ring is None:
                 time.sleep(0.05); continue
             if self._in_ring.available < needed:
                 time.sleep(0.01); continue
+
+            # Drop stale backlog to stay real-time (see max_backlog above).
+            if self._in_ring.available > max_backlog:
+                self._dropped_samples += self._in_ring.available - needed
+                self._in_ring.consume(self._in_ring.available - needed)
 
             block = self._in_ring.read(chunk_n)
             if block is None:
